@@ -1,0 +1,10 @@
+[project]
+name = "nexocrypto-workspace"
+version = "0.0.0"
+description = "Workspace metadata for NexoCrypto (test runner config). Real packages live under packages/ and services/."
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["packages/shared/src", "services/api/src"]
+addopts = "-ra"

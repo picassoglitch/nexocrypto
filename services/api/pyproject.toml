@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nexocrypto-api"
+version = "0.0.1"
+description = "FastAPI app for NexoCrypto."
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.111,<1",
+  "uvicorn[standard]>=0.30,<1",
+  "nexocrypto-shared",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
