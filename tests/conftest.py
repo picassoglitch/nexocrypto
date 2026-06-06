@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import os
+import sys
 from pathlib import Path
 from uuid import uuid4
 
 import psycopg
 import pytest
+
+
+# psycopg async requires SelectorEventLoop on Windows (the default is Proactor on 3.8+).
+# Set the policy before pytest-asyncio creates its loop.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SUPABASE_DIR = REPO_ROOT / "supabase"

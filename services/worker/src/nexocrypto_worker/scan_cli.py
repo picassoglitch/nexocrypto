@@ -4,6 +4,11 @@
   python -m nexocrypto_worker.scan_cli BTCUSDT --interval 30 --ticks 5
   python -m nexocrypto_worker.scan_cli ETHUSDT --bars 500 --tf 15m
 
+  # Persist signals into Postgres (same DB the API runs against):
+  python -m nexocrypto_worker.scan_cli BTCUSDT --persist \
+    --dsn postgresql://postgres@127.0.0.1:5432/nexocrypto \
+    --user 11111111-1111-1111-1111-111111111111
+
 CLAUDE.md compliance: PAPER mode only, no order placement, deterministic decisions
 printed with reasons. No LLM in the path.
 """
@@ -13,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from uuid import UUID
 
 from nexocrypto_connectors.bitunix import BitunixConnector
 
@@ -47,12 +53,33 @@ def _render(result: ScanResult) -> str:
 
 
 async def run(args: argparse.Namespace) -> int:
+    # Set selector loop policy on Windows for psycopg async compat (when --persist).
+    if args.persist and sys.platform == "win32":
+        import asyncio as _aio
+        try:
+            _aio.set_event_loop_policy(_aio.WindowsSelectorEventLoopPolicy())
+        except Exception:
+            pass
+
+    store = None
+    user_id = None
+    if args.persist:
+        if not args.dsn:
+            print("--persist requires --dsn", file=sys.stderr)
+            return 2
+        from nexocrypto_api.pg_store import PgStore  # noqa: WPS433
+
+        store = PgStore(args.dsn)
+        user_id = UUID(args.user)
+        print(f"persist: enabled (dsn={args.dsn}, user={user_id})", flush=True)
+
     venue = BitunixConnector()
     try:
         for tick in range(1, args.ticks + 1):
             try:
                 result = await scan_once(
-                    venue, args.symbol, interval=args.tf, bars=args.bars
+                    venue, args.symbol, interval=args.tf, bars=args.bars,
+                    store=store, user_id=user_id,
                 )
                 print(f"--- tick {tick}/{args.ticks} ---")
                 print(_render(result), flush=True)
@@ -72,6 +99,11 @@ def main() -> int:
     p.add_argument("--ticks", type=int, default=1, help="number of ticks to run")
     p.add_argument("--tf", default="5m", help="kline timeframe")
     p.add_argument("--bars", type=int, default=300, help="kline lookback")
+    p.add_argument("--persist", action="store_true",
+                   help="persist every signal + decision into Postgres via PgStore")
+    p.add_argument("--dsn", help="libpq DSN for --persist; e.g. postgresql://postgres@127.0.0.1:5432/nexocrypto")
+    p.add_argument("--user", default="11111111-1111-1111-1111-111111111111",
+                   help="user UUID rows are persisted under (default: the demo user)")
     args = p.parse_args()
     return asyncio.run(run(args))
 

@@ -4,11 +4,16 @@ Auth: stub. Real impl verifies a Supabase JWT against SUPABASE_JWT_SECRET and pu
 user_id from the `sub` claim. For now we accept an X-User-Id header — the dashboard /
 Telegram bot will set it server-side after auth. Tests use a fixed UUID.
 
+Store selection: NEXOCRYPTO_STORE=memory|pg picks the backend.
+  - memory (default): in-process InMemoryStore — good for the dashboard demo
+  - pg: PgStore against NEXOCRYPTO_DATABASE_URL (libpq DSN)
+
 CLAUDE.md rule 7: secrets never returned to the client; never logged.
 """
 
 from __future__ import annotations
 
+import os
 from uuid import UUID
 
 from fastapi import Header, HTTPException, status
@@ -16,8 +21,19 @@ from fastapi import Header, HTTPException, status
 from .store import ApiStore, InMemoryStore
 
 
-# Module-level singleton for the in-memory store. Swap for a Supabase store in prod.
-_STORE: ApiStore = InMemoryStore()
+def _build_store() -> ApiStore:
+    kind = os.environ.get("NEXOCRYPTO_STORE", "memory").strip().lower()
+    if kind == "pg":
+        dsn = os.environ.get("NEXOCRYPTO_DATABASE_URL")
+        if not dsn:
+            raise RuntimeError("NEXOCRYPTO_STORE=pg but NEXOCRYPTO_DATABASE_URL is unset")
+        # Imported lazily so the memory path doesn't need psycopg installed.
+        from .pg_store import PgStore  # noqa: WPS433
+        return PgStore(dsn)
+    return InMemoryStore()
+
+
+_STORE: ApiStore = _build_store()
 
 
 def get_store() -> ApiStore:

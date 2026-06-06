@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Awaitable, Callable, Protocol
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
@@ -55,6 +56,13 @@ class KlineSource(Protocol):
 
     async def klines(self, pair: str, interval: str, *, limit: int = 100) -> list[Kline]: ...
     async def funding(self, pair: str): ...
+
+
+class StoreLike(Protocol):
+    """Subset of ApiStore the scanner persists to. Both InMemoryStore and PgStore satisfy."""
+
+    async def add_parsed_signal(self, *, user_id: UUID, signal, raw_text: str | None = None) -> dict: ...
+    async def add_validated_signal(self, *, user_id: UUID, decision) -> dict: ...
 
 
 @dataclass(frozen=True)
@@ -162,6 +170,8 @@ async def scan_once(
     mode: Mode = Mode.PAPER,
     strategy_stats: dict[str, StrategyStats] | None = None,
     now: datetime | None = None,
+    store: StoreLike | None = None,
+    user_id: UUID | None = None,
 ) -> ScanResult:
     """Run one scan tick: snapshot → strategies → risk → ScanResult.
 
@@ -206,6 +216,10 @@ async def scan_once(
             now=ts,
         )
         outcomes.append(StrategyOutcome(strategy_key=strat.key, signal=sig, decision=decision))
+
+        if store is not None and user_id is not None:
+            await store.add_parsed_signal(user_id=user_id, signal=sig)
+            await store.add_validated_signal(user_id=user_id, decision=decision)
 
     return ScanResult(
         pair=pair,
