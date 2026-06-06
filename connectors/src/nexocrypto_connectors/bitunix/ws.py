@@ -1,26 +1,22 @@
 """Bitunix futures public WebSocket transport.
 
 Confirmed from docs (https://www.bitunix.com/api-docs/futures/websocket/prepare/WebSocket.html
-and the Tickers channel doc):
+and the Tickers channel doc), with depth_books verified from a live socket capture
+2026-06-06:
 
   * URL: wss://fapi.bitunix.com/public/
   * Subscribe envelope:  {"op":"subscribe",   "args":[{"symbol":"BTCUSDT","ch":"<name>"}]}
   * Unsubscribe envelope:{"op":"unsubscribe", "args":[{"symbol":"BTCUSDT","ch":"<name>"}]}
-  * Inbound message:     {"ch":"<name>","ts":<ms>,"data":[...]}
+  * Standard inbound:    {"ch":"<name>","ts":<ms>,"symbol":"...","data":<channel-shape>}
+  * Connection ack:      {"op":"connect","data":{"result":true}}  (ignore for app logic)
   * Heartbeat: client sends {"op":"ping","ts":<ms>}, server replies {"op":"pong","ts":<ms>}.
   * Max 300 channel subscriptions per connection.
 
-What this module ships:
-  * Connect / disconnect.
-  * Subscribe / unsubscribe.
-  * Heartbeat loop.
-  * Inbound demux: async iterator yielding parsed envelope dicts.
-
-What this module DOES NOT ship (yet):
-  * A depth_books payload decoder. The depth-book channel doc page is 404 and the exact
-    snapshot-vs-diff shape is unverified. CLAUDE.md §0.3 forbids gating fills on a guessed
-    book shape; the decoder will be added in a separate commit once a live capture confirms
-    the payload. See connectors/bitunix/capture.py.
+depth_books payload:
+  data.a = asks  (price ascending, top-of-book first)
+  data.b = bids  (price descending, top-of-book first)
+  Each level is [price_string, size_string]. Each message is a FULL book snapshot
+  (no diff/seq) — replace the local book entirely on every tick.
 """
 
 from __future__ import annotations
@@ -31,9 +27,13 @@ import json
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from decimal import Decimal
 
 import websockets
 from websockets.asyncio.client import ClientConnection, connect
+
+from nexocrypto_shared import OrderBookLevel, OrderBookSnapshot
 
 
 BITUNIX_PUBLIC_WS_URL = "wss://fapi.bitunix.com/public/"
@@ -189,3 +189,85 @@ class BitunixPublicWS:
                     return
         except asyncio.CancelledError:
             raise
+
+
+# ─── depth_books decoder ──────────────────────────────────────────────────────
+
+
+DEPTH_BOOKS_CHANNEL = "depth_books"
+
+
+def decode_depth_books(envelope: dict) -> OrderBookSnapshot | None:
+    """Decode a single depth_books envelope into a shared OrderBookSnapshot.
+
+    Returns None for non-depth messages (connection acks, other channels, malformed
+    payloads). The snapshot is full (no merging needed); each Bitunix tick replaces the
+    local book.
+    """
+    if envelope.get("ch") != DEPTH_BOOKS_CHANNEL:
+        return None
+    data = envelope.get("data")
+    if not isinstance(data, dict):
+        return None
+    asks_raw = data.get("a", [])
+    bids_raw = data.get("b", [])
+    if not isinstance(asks_raw, list) or not isinstance(bids_raw, list):
+        return None
+
+    asks = [
+        OrderBookLevel(price=Decimal(str(p)), size=Decimal(str(s)))
+        for p, s in asks_raw
+    ]
+    bids = [
+        OrderBookLevel(price=Decimal(str(p)), size=Decimal(str(s)))
+        for p, s in bids_raw
+    ]
+
+    ts_ms = envelope.get("ts")
+    taken_at = (
+        datetime.fromtimestamp(int(ts_ms) / 1000, tz=timezone.utc)
+        if isinstance(ts_ms, (int, float, str)) and str(ts_ms).isdigit()
+        else datetime.now(timezone.utc)
+    )
+
+    return OrderBookSnapshot(
+        exchange="bitunix",
+        pair=str(envelope.get("symbol", "")),
+        taken_at=taken_at,
+        bids=bids,
+        asks=asks,
+        is_native=True,  # CLAUDE.md §0.3: this IS the fill-gating book on Bitunix
+    )
+
+
+class BitunixDepthBooksStream:
+    """High-level: subscribe to depth_books for one symbol, yield OrderBookSnapshots.
+
+    Each yielded snapshot is a complete book (Bitunix's depth_books is a snapshot stream,
+    not a diff stream). Caller may downsample or rate-limit as needed for the strategy
+    engine.
+    """
+
+    def __init__(
+        self,
+        symbol: str,
+        *,
+        url: str = BITUNIX_PUBLIC_WS_URL,
+        heartbeat_seconds: float = 20.0,
+    ) -> None:
+        self._symbol = symbol
+        self._ws = BitunixPublicWS(url=url, heartbeat_seconds=heartbeat_seconds)
+
+    async def __aenter__(self) -> "BitunixDepthBooksStream":
+        await self._ws.connect()
+        await self._ws.subscribe(Channel(ch=DEPTH_BOOKS_CHANNEL, symbol=self._symbol))
+        return self
+
+    async def __aexit__(self, *a) -> None:
+        await self._ws.aclose()
+
+    async def books(self) -> AsyncIterator[OrderBookSnapshot]:
+        async for envelope in self._ws.messages():
+            snap = decode_depth_books(envelope)
+            if snap is not None:
+                yield snap

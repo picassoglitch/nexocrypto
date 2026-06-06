@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -18,8 +19,10 @@ import websockets
 from websockets.asyncio.server import serve
 
 from nexocrypto_connectors.bitunix.ws import (
+    BitunixDepthBooksStream,
     BitunixPublicWS,
     Channel,
+    decode_depth_books,
     encode_ping,
     encode_subscribe,
     encode_unsubscribe,
@@ -164,3 +167,91 @@ async def test_subscribe_caps_at_300():
     too_many = [Channel("tickers", f"S{i}") for i in range(301)]
     with pytest.raises(RuntimeError, match="subscription cap"):
         await ws.subscribe(*too_many)
+
+
+# ─── depth_books decoder (shape verified from live capture 2026-06-06) ────
+
+
+def test_decode_depth_books_parses_recorded_envelope():
+    import json
+    from pathlib import Path
+
+    env = json.loads(
+        (Path(__file__).parent / "fixtures" / "bitunix" / "ws_depth_books.json").read_text()
+    )
+    snap = decode_depth_books(env)
+    assert snap is not None
+    assert snap.exchange == "bitunix"
+    assert snap.pair == "BTCUSDT"
+    assert snap.is_native is True  # CLAUDE.md §0.3
+    assert len(snap.asks) == 3
+    assert len(snap.bids) == 3
+    # Bitunix delivers asks ascending (best ask first)
+    assert snap.asks[0].price == Decimal("60959.4")
+    # ...and bids descending (best bid first)
+    assert snap.bids[0].price == Decimal("60959.3")
+    # Spread check
+    assert snap.asks[0].price > snap.bids[0].price
+
+
+def test_decode_depth_books_returns_none_for_other_channels():
+    assert decode_depth_books({"ch": "tickers", "data": []}) is None
+    assert decode_depth_books({"op": "connect", "data": {"result": True}}) is None
+    assert decode_depth_books({}) is None
+
+
+def test_decode_depth_books_returns_none_for_malformed_data():
+    assert decode_depth_books({"ch": "depth_books", "data": "not a dict"}) is None
+    assert decode_depth_books({"ch": "depth_books", "data": {"a": "x"}}) is None
+
+
+def test_decode_depth_books_uses_ts_when_present():
+    snap = decode_depth_books({
+        "ch": "depth_books",
+        "symbol": "BTCUSDT",
+        "ts": 1780731553373,
+        "data": {"a": [["100", "1"]], "b": [["99", "1"]]},
+    })
+    assert snap is not None
+    assert snap.taken_at.year == 2026
+
+
+def test_depth_books_stream_yields_snapshots_from_envelopes():
+    """The stream wrapper extracts only depth_books envelopes from the underlying WS."""
+    import asyncio
+    import json
+
+    async def run() -> list:
+        # Spin a mini local WS that emits a connect ack then a depth_books message.
+        from websockets.asyncio.server import serve
+
+        async def handler(ws):
+            async for raw in ws:
+                msg = json.loads(raw)
+                if msg.get("op") == "subscribe":
+                    await ws.send(json.dumps({"op": "connect", "data": {"result": True}}))
+                    await ws.send(json.dumps({
+                        "ch": "depth_books",
+                        "symbol": "BTCUSDT",
+                        "ts": 1780731553373,
+                        "data": {"a": [["60959.4", "1.2215"]], "b": [["60959.3", "4.6782"]]},
+                    }))
+
+        server = await serve(handler, "127.0.0.1", 0)
+        sock = next(iter(server.sockets))
+        url = f"ws://127.0.0.1:{sock.getsockname()[1]}/"
+
+        out = []
+        async with BitunixDepthBooksStream("BTCUSDT", url=url, heartbeat_seconds=999) as s:
+            async for snap in s.books():
+                out.append(snap)
+                break  # one is enough to prove the pipeline
+        server.close()
+        await server.wait_closed()
+        return out
+
+    snaps = asyncio.run(run())
+    assert len(snaps) == 1
+    assert snaps[0].pair == "BTCUSDT"
+    assert snaps[0].asks[0].price == Decimal("60959.4")
+    assert snaps[0].is_native is True
