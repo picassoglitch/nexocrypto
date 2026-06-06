@@ -8,9 +8,11 @@ from .base import (
     PositionInfo,
     PositionSide,
 )
+from .binance_data import BinanceDataConnector
 
 __all__ = [
     "Balance",
+    "BinanceDataConnector",
     "ConnectorError",
     "ExchangeConnector",
     "FundingInfo",
