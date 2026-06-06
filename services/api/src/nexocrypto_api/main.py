@@ -4,7 +4,10 @@ from fastapi import FastAPI
 
 from nexocrypto_shared import get_settings
 
+from .routes import router as api_router
+
 app = FastAPI(title="NexoCrypto API", version="0.0.1")
+app.include_router(api_router)
 
 
 @app.get("/api/health")
