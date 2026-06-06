@@ -1,0 +1,26 @@
+{
+  "code": 0,
+  "msg": "Success",
+  "data": [
+    {
+      "open": "60000",
+      "high": "60100",
+      "close": "60050",
+      "low": "59989.2",
+      "time": 1764979200000,
+      "quoteVol": "1234.5",
+      "baseVol": "0.02055",
+      "type": "LAST_PRICE"
+    },
+    {
+      "open": "60050",
+      "high": "60200",
+      "close": "60175",
+      "low": "60020",
+      "time": 1764979260000,
+      "quoteVol": "2345.7",
+      "baseVol": "0.039",
+      "type": "LAST_PRICE"
+    }
+  ]
+}

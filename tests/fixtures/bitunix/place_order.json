@@ -1,0 +1,8 @@
+{
+  "code": 0,
+  "msg": "Success",
+  "data": {
+    "orderId": "ord-987654321",
+    "clientId": "dedup-abc123"
+  }
+}

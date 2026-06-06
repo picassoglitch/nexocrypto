@@ -1,0 +1,46 @@
+{
+  "code": 0,
+  "msg": "Success",
+  "data": [
+    {
+      "positionId": "p-1",
+      "symbol": "BTCUSDT",
+      "qty": "0.05",
+      "entryValue": "3005.0",
+      "side": "LONG",
+      "positionMode": "ONE_WAY",
+      "marginMode": "ISOLATION",
+      "leverage": 10,
+      "fee": "0.30",
+      "funding": "0.05",
+      "realizedPNL": "0",
+      "margin": "300.50",
+      "unrealizedPNL": "5.20",
+      "liqPrice": "54000",
+      "marginRate": "0.05",
+      "avgOpenPrice": "60100",
+      "ctime": 1764970000000,
+      "mtime": 1764979200000
+    },
+    {
+      "positionId": "p-2",
+      "symbol": "ETHUSDT",
+      "qty": "1",
+      "entryValue": "3500",
+      "side": "SHORT",
+      "positionMode": "ONE_WAY",
+      "marginMode": "CROSS",
+      "leverage": 5,
+      "fee": "0.10",
+      "funding": "0.01",
+      "realizedPNL": "0",
+      "margin": "700",
+      "unrealizedPNL": "-3.0",
+      "liqPrice": "0",
+      "marginRate": "0",
+      "avgOpenPrice": "3500",
+      "ctime": 1764970000000,
+      "mtime": 1764979200000
+    }
+  ]
+}

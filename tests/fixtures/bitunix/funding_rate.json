@@ -1,0 +1,16 @@
+{
+  "code": 0,
+  "msg": "Success",
+  "data": [
+    {
+      "symbol": "BTCUSDT",
+      "markPrice": "60100",
+      "lastPrice": "60099.5",
+      "fundingRate": "0.0001",
+      "fundingInterval": 8,
+      "nextFundingTime": "1764979200000",
+      "maxFundingRate": "0.3",
+      "minFundingRate": "-0.3"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "code": 0,
+  "msg": "Success",
+  "data": [
+    {
+      "marginCoin": "USDT",
+      "available": "1000.50",
+      "frozen": "12.00",
+      "margin": "50.25",
+      "transfer": "0",
+      "positionMode": "ONE_WAY",
+      "crossUnrealizedPNL": "2.30",
+      "isolationUnrealizedPNL": "-0.45",
+      "bonus": "0"
+    }
+  ]
+}

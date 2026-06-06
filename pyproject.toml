@@ -6,5 +6,6 @@ requires-python = ">=3.12"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["packages/shared/src", "services/api/src"]
+pythonpath = ["packages/shared/src", "services/api/src", "connectors/src"]
 addopts = "-ra"
+asyncio_mode = "auto"
