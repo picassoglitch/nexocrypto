@@ -6,6 +6,6 @@ requires-python = ">=3.12"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["packages/shared/src", "services/api/src", "services/engine/src", "services/telegram_ingest/src", "connectors/src"]
+pythonpath = ["packages/shared/src", "services/api/src", "services/engine/src", "services/telegram_ingest/src", "services/telegram_control/src", "connectors/src"]
 addopts = "-ra"
 asyncio_mode = "auto"
