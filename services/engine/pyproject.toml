@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nexocrypto-engine"
+version = "0.0.1"
+description = "Deterministic Strategy + Risk engines for NexoCrypto. No LLMs in the execution path."
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic>=2.7,<3",
+  "nexocrypto-shared",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
