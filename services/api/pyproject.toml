@@ -15,3 +15,6 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"nexocrypto_api" = ["dashboard/*.html", "dashboard/*.css", "dashboard/*.js"]
