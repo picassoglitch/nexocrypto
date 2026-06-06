@@ -16,6 +16,9 @@ venv/
 .env.*
 !.env.example
 
+# Runtime
+.api_port
+
 # Editor / OS
 .vscode/
 .idea/
