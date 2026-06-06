@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nexocrypto-telegram-ingest"
+version = "0.0.1"
+description = "Telethon ingest + signal parser for NexoCrypto."
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic>=2.7,<3",
+  "nexocrypto-shared",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

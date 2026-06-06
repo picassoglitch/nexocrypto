@@ -9,6 +9,7 @@ from .base import (
     PositionSide,
 )
 from .binance_data import BinanceDataConnector
+from .lbank import LBankPublicConnector, LBankTicker
 
 __all__ = [
     "Balance",
@@ -16,6 +17,8 @@ __all__ = [
     "ConnectorError",
     "ExchangeConnector",
     "FundingInfo",
+    "LBankPublicConnector",
+    "LBankTicker",
     "OrderRequest",
     "OrderResult",
     "PositionInfo",

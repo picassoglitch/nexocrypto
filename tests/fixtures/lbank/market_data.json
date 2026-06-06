@@ -1,0 +1,30 @@
+{
+  "data": [
+    {
+      "symbol": "BTCUSDT",
+      "lastPrice": "60100.5",
+      "highestPrice": "60500",
+      "lowestPrice": "59800",
+      "openPrice": "60000",
+      "volume": "1234.5",
+      "turnover": "74100000",
+      "markedPrice": "60101.2",
+      "prePositionFeeRate": "0.0001"
+    },
+    {
+      "symbol": "ETHUSDT",
+      "lastPrice": "3500.2",
+      "highestPrice": "3520",
+      "lowestPrice": "3480",
+      "openPrice": "3490",
+      "volume": "555.0",
+      "turnover": "1942611",
+      "markedPrice": "3500.5",
+      "prePositionFeeRate": "0.00005"
+    }
+  ],
+  "error_code": 0,
+  "msg": "",
+  "result": "",
+  "success": true
+}

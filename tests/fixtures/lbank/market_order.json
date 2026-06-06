@@ -1,0 +1,19 @@
+{
+  "data": {
+    "symbol": "BTCUSDT",
+    "asks": [
+      {"price": 60100.5, "volume": 0.5, "orders": 2},
+      {"price": 60101.0, "volume": 1.2, "orders": 4},
+      {"price": 60102.0, "volume": 3.0, "orders": 7}
+    ],
+    "bids": [
+      {"price": 60099.5, "volume": 0.7, "orders": 3},
+      {"price": 60099.0, "volume": 1.5, "orders": 5},
+      {"price": 60098.0, "volume": 2.0, "orders": 6}
+    ]
+  },
+  "error_code": 0,
+  "msg": "",
+  "result": "",
+  "success": true
+}
