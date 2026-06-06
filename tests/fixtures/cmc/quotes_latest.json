@@ -1,0 +1,29 @@
+{
+  "status": {"timestamp": "2026-06-06T12:00:00.000Z", "error_code": 0},
+  "data": {
+    "BTC": {
+      "symbol": "BTC",
+      "quote": {
+        "USD": {
+          "price": 60125.00,
+          "volume_24h": 35100000000,
+          "percent_change_24h": 2.6,
+          "market_cap": 1181000000000,
+          "last_updated": "2026-06-06T12:01:00.000Z"
+        }
+      }
+    },
+    "ETH": {
+      "symbol": "ETH",
+      "quote": {
+        "USD": {
+          "price": 3502.00,
+          "volume_24h": 19100000000,
+          "percent_change_24h": -1.1,
+          "market_cap": 421000000000,
+          "last_updated": "2026-06-06T12:01:00.000Z"
+        }
+      }
+    }
+  }
+}

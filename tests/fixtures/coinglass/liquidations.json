@@ -1,0 +1,8 @@
+{
+  "code": "0",
+  "msg": "",
+  "data": [
+    {"time": 1780728000000, "longLiquidationUsd": "1250000", "shortLiquidationUsd": "832000"},
+    {"time": 1780731600000, "longLiquidationUsd": "510000", "shortLiquidationUsd": "1820000"}
+  ]
+}

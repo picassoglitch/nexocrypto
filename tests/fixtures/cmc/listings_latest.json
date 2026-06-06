@@ -1,0 +1,35 @@
+{
+  "status": {"timestamp": "2026-06-06T12:00:00.000Z", "error_code": 0, "error_message": null},
+  "data": [
+    {
+      "id": 1,
+      "name": "Bitcoin",
+      "symbol": "BTC",
+      "cmc_rank": 1,
+      "quote": {
+        "USD": {
+          "price": 60123.45,
+          "volume_24h": 35000000000,
+          "percent_change_24h": 2.5,
+          "market_cap": 1180000000000,
+          "last_updated": "2026-06-06T12:00:00.000Z"
+        }
+      }
+    },
+    {
+      "id": 1027,
+      "name": "Ethereum",
+      "symbol": "ETH",
+      "cmc_rank": 2,
+      "quote": {
+        "USD": {
+          "price": 3501.20,
+          "volume_24h": 19000000000,
+          "percent_change_24h": -1.2,
+          "market_cap": 420000000000,
+          "last_updated": "2026-06-06T12:00:00.000Z"
+        }
+      }
+    }
+  ]
+}
