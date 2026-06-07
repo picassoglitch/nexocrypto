@@ -7,10 +7,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Workspace layout — the api package depends on shared + connectors at runtime
+# (routes.py imports the Bitunix client for the /api/klines proxy), so the
+# build needs all three in the context. Build context is the repo root —
+# enforced by railway.json's dockerfilePath = services/api/Dockerfile.
 COPY packages/shared/ /app/packages/shared/
-COPY services/api/ /app/services/api/
+COPY connectors/     /app/connectors/
+COPY services/api/   /app/services/api/
 
-RUN pip install /app/packages/shared && pip install /app/services/api
+RUN pip install \
+      /app/packages/shared \
+      /app/connectors \
+      /app/services/api
 
 EXPOSE 8000
 
