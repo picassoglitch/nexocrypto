@@ -464,6 +464,83 @@ class PgStore:
         finally:
             await conn.close()
 
+    # ── tenants (Nexo AI integration) ─────────────────────────────────────
+
+    async def provision_tenant(
+        self,
+        *,
+        external_user_id: str,
+        email: str,
+        display_name: str | None,
+        tier: str,
+    ) -> tuple[dict, bool]:
+        """Insert a tenant or return the existing row. Idempotent on
+        external_user_id (unique). Returns (tenant, created)."""
+        import secrets
+        conn = await self._conn()
+        try:
+            # Check first to know if we created or found.
+            cur = await conn.execute(
+                """
+                select id, external_user_id, email, display_name, tier, status,
+                       api_token, created_at, updated_at
+                  from nexocrypto.tenants where external_user_id = %s
+                """,
+                (external_user_id,),
+            )
+            existing = await cur.fetchone()
+            if existing is not None:
+                return (self._json_safe(existing), False)
+            token = secrets.token_urlsafe(32)
+            cur = await conn.execute(
+                """
+                insert into nexocrypto.tenants
+                  (external_user_id, email, display_name, tier, api_token)
+                values (%s, %s, %s, %s, %s)
+                returning id, external_user_id, email, display_name, tier, status,
+                          api_token, created_at, updated_at
+                """,
+                (external_user_id, email, display_name, tier, token),
+            )
+            row = await cur.fetchone()
+            return (self._json_safe(row), True)
+        finally:
+            await conn.close()
+
+    async def get_tenant_by_id(self, *, tenant_id: UUID) -> dict | None:
+        conn = await self._conn()
+        try:
+            cur = await conn.execute(
+                """
+                select id, external_user_id, email, display_name, tier, status,
+                       api_token, created_at, updated_at
+                  from nexocrypto.tenants where id = %s
+                """,
+                (tenant_id,),
+            )
+            row = await cur.fetchone()
+            return self._json_safe(row) if row else None
+        finally:
+            await conn.close()
+
+    async def set_tenant_status(self, *, tenant_id: UUID, status: str) -> dict | None:
+        conn = await self._conn()
+        try:
+            cur = await conn.execute(
+                """
+                update nexocrypto.tenants
+                   set status = %s, updated_at = now()
+                 where id = %s
+                 returning id, external_user_id, email, display_name, tier, status,
+                           api_token, created_at, updated_at
+                """,
+                (status, tenant_id),
+            )
+            row = await cur.fetchone()
+            return self._json_safe(row) if row else None
+        finally:
+            await conn.close()
+
     # ── exchange connections (encrypted at rest) ──────────────────────────
 
     async def add_exchange_connection(

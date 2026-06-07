@@ -9,7 +9,9 @@ from fastapi.responses import FileResponse, RedirectResponse
 
 from nexocrypto_shared import get_settings
 
+from .admin import admin_router
 from .routes import router as api_router
+from .sso import sso_router
 
 
 def _cors_origins() -> list[str]:
@@ -31,6 +33,8 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-User-Id"],
 )
 app.include_router(api_router)
+app.include_router(admin_router)
+app.include_router(sso_router)
 
 _DASHBOARD_DIR = Path(__file__).parent / "dashboard"
 

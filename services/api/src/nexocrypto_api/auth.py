@@ -20,7 +20,7 @@ import os
 from uuid import UUID
 
 import jwt
-from fastapi import Header, HTTPException, status
+from fastapi import Cookie, Header, HTTPException, status
 
 
 _DEFAULT_MODE = "stub"
@@ -74,14 +74,33 @@ def _verify_bearer(token: str) -> UUID:
 async def current_user_id(
     authorization: str | None = Header(default=None),
     x_user_id: str | None = Header(default=None),
+    nxc_session: str | None = Cookie(default=None),
 ) -> UUID:
-    """FastAPI dependency. Resolves user_id from JWT or X-User-Id based on mode."""
+    """FastAPI dependency. Resolves user_id from JWT, session cookie, or stub.
+
+    In `jwt` mode (production):
+      1. Try nxc_session cookie (minted by /auth/sso). Single hop from a Nexo AI
+         "Abrir NexoCrypto" click — best UX, no Bearer juggling on every
+         dashboard request.
+      2. Fall back to Authorization: Bearer for direct-API callers (CLI, tests).
+    In `stub` mode (local dev): X-User-Id header.
+    """
     mode = _mode()
     if mode == "jwt":
+        if nxc_session:
+            # Local import keeps the route layer's import graph small.
+            from .sso import verify_session_jwt
+
+            claims = verify_session_jwt(nxc_session)
+            sub = claims.get("sub")
+            try:
+                return UUID(str(sub))
+            except (TypeError, ValueError) as e:
+                raise HTTPException(status_code=401, detail="session sub is not a uuid") from e
         if authorization is None or not authorization.lower().startswith("bearer "):
             raise HTTPException(
                 status_code=401,
-                detail="missing Bearer token",
+                detail="missing Bearer token or session cookie",
             )
         return _verify_bearer(authorization[7:].strip())
     # stub mode: keep existing X-User-Id behaviour

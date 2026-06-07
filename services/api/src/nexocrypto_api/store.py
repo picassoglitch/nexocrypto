@@ -45,6 +45,18 @@ class ApiStore(Protocol):
     # ── strategies ────────────────────────────────────────
     async def list_strategies(self) -> list[dict]: ...
 
+    # ── tenants (Nexo AI integration) ─────────────────────────────────
+    async def provision_tenant(
+        self,
+        *,
+        external_user_id: str,
+        email: str,
+        display_name: str | None,
+        tier: str,
+    ) -> tuple[dict, bool]: ...
+    async def get_tenant_by_id(self, *, tenant_id: UUID) -> dict | None: ...
+    async def set_tenant_status(self, *, tenant_id: UUID, status: str) -> dict | None: ...
+
     # ── connections (encrypted at rest; secrets never returned) ────────
     async def add_exchange_connection(
         self,
@@ -76,6 +88,7 @@ class InMemoryStore:
             {"key": "fvg_ob", "name": "FVG + Order Block", "enabled": True},
         ]
         self._connections: list[dict] = []
+        self._tenants: list[dict] = []
 
     async def list_signals(self, *, user_id: UUID, status: str | None = None) -> list[dict]:
         out = [s for s in self._signals if s["user_id"] == user_id]
@@ -194,6 +207,44 @@ class InMemoryStore:
 
     async def list_strategies(self) -> list[dict]:
         return list(self._strategies)
+
+    async def provision_tenant(
+        self,
+        *,
+        external_user_id: str,
+        email: str,
+        display_name: str | None,
+        tier: str,
+    ) -> tuple[dict, bool]:
+        """Return (tenant, created). created=False means we found an existing row."""
+        import secrets
+        for t in self._tenants:
+            if t["external_user_id"] == external_user_id:
+                return (dict(t), False)
+        record = {
+            "id": uuid4(),
+            "external_user_id": external_user_id,
+            "email": email,
+            "display_name": display_name,
+            "tier": tier,
+            "status": "active",
+            "api_token": secrets.token_urlsafe(32),
+        }
+        self._tenants.append(record)
+        return (dict(record), True)
+
+    async def get_tenant_by_id(self, *, tenant_id: UUID) -> dict | None:
+        for t in self._tenants:
+            if t["id"] == tenant_id:
+                return dict(t)
+        return None
+
+    async def set_tenant_status(self, *, tenant_id: UUID, status: str) -> dict | None:
+        for t in self._tenants:
+            if t["id"] == tenant_id:
+                t["status"] = status
+                return dict(t)
+        return None
 
     async def add_exchange_connection(
         self,
