@@ -212,6 +212,36 @@ async def queue_backtest(
 # ── SSE telemetry (skeleton — real subscription is wired in Phase 6 worker) ──
 
 
+@router.get("/klines/{pair}")
+async def proxy_klines(
+    pair: str,
+    interval: str = Query(default="5m"),
+    bars: int = Query(default=200, ge=10, le=1500),
+    _user_id: UUID = Depends(get_current_user_id),
+) -> list[dict]:
+    """Proxy Bitunix public klines so the dashboard chart doesn't need CORS or keys.
+
+    Returns rows shaped {time, open, high, low, close} ready for Lightweight Charts.
+    """
+    from nexocrypto_connectors.bitunix import BitunixConnector  # local to keep startup light
+
+    venue = BitunixConnector()
+    try:
+        rows = await venue.klines(pair, interval, limit=bars)
+    finally:
+        await venue.aclose()
+    return [
+        {
+            "time": int(k.open_time.timestamp()),
+            "open": float(k.open),
+            "high": float(k.high),
+            "low": float(k.low),
+            "close": float(k.close),
+        }
+        for k in rows
+    ]
+
+
 @router.get("/stream")
 async def stream(
     _user_id: UUID = Depends(get_current_user_id),
