@@ -14,13 +14,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
-from nexocrypto_shared import FeeSchedule, Mode, RiskProfile
+from nexocrypto_shared import FeeSchedule, Mode, RiskProfile, vault_from_env
 
 from .deps import get_current_user_id, get_store
 from .store import ApiStore
 
 
 router = APIRouter(prefix="/api")
+
+
+_VALID_EXCHANGES = {"binance", "lbank", "bitunix"}
 
 
 # ── signals ────────────────────────────────────────────────────────────────
@@ -74,6 +77,69 @@ async def post_approval_decision(
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="approval not found")
     return result
+
+
+# ── connections (encrypted; secrets NEVER returned — CLAUDE.md rule 7) ─────
+
+
+class ExchangeConnectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    exchange: str
+    api_key: str
+    api_secret: str
+    ip_allowlist: list[str] | None = None
+
+
+@router.get("/connections/exchange")
+async def list_exchange_connections_(
+    user_id: UUID = Depends(get_current_user_id),
+    store: ApiStore = Depends(get_store),
+) -> list[dict]:
+    """List the operator's exchange connections WITHOUT secrets."""
+    return await store.list_exchange_connections(user_id=user_id)
+
+
+@router.post("/connections/exchange", status_code=status.HTTP_201_CREATED)
+async def add_exchange_connection_(
+    body: ExchangeConnectionRequest,
+    user_id: UUID = Depends(get_current_user_id),
+    store: ApiStore = Depends(get_store),
+) -> dict:
+    """Store an encrypted exchange API key + secret. The plaintext NEVER touches
+    the DB — it's encrypted via the SecretsVault (Fernet on
+    NEXOCRYPTO_MASTER_ENCRYPTION_KEY) before insert. The response NEVER echoes
+    the plaintext back (CLAUDE.md rule 7)."""
+    exchange = body.exchange.strip().lower()
+    if exchange not in _VALID_EXCHANGES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"unknown exchange {body.exchange!r}; allowed: {sorted(_VALID_EXCHANGES)}",
+        )
+    if not body.api_key or not body.api_secret:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="api_key and api_secret are required",
+        )
+    try:
+        vault = vault_from_env()
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        ) from e
+    key_enc = vault.encrypt(body.api_key)
+    secret_enc = vault.encrypt(body.api_secret)
+    record = await store.add_exchange_connection(
+        user_id=user_id,
+        exchange=exchange,
+        api_key_enc=key_enc,
+        api_secret_enc=secret_enc,
+        ip_allowlist=body.ip_allowlist,
+    )
+    # Defensive scrub — even if the store accidentally returned _enc bytes, drop them.
+    return {
+        k: v for k, v in record.items()
+        if k not in ("api_key_enc", "api_secret_enc")
+    }
 
 
 # ── execution ──────────────────────────────────────────────────────────────

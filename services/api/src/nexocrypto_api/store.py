@@ -45,6 +45,18 @@ class ApiStore(Protocol):
     # ── strategies ────────────────────────────────────────
     async def list_strategies(self) -> list[dict]: ...
 
+    # ── connections (encrypted at rest; secrets never returned) ────────
+    async def add_exchange_connection(
+        self,
+        *,
+        user_id: UUID,
+        exchange: str,
+        api_key_enc: bytes,
+        api_secret_enc: bytes,
+        ip_allowlist: list[str] | None = None,
+    ) -> dict: ...
+    async def list_exchange_connections(self, *, user_id: UUID) -> list[dict]: ...
+
 
 class InMemoryStore:
     """Process-local store for tests + the API skeleton. Not multi-process safe; will be
@@ -63,6 +75,7 @@ class InMemoryStore:
             {"key": "vwap_rsi_meanrev", "name": "VWAP/RSI mean-reversion", "enabled": True},
             {"key": "fvg_ob", "name": "FVG + Order Block", "enabled": True},
         ]
+        self._connections: list[dict] = []
 
     async def list_signals(self, *, user_id: UUID, status: str | None = None) -> list[dict]:
         out = [s for s in self._signals if s["user_id"] == user_id]
@@ -181,3 +194,47 @@ class InMemoryStore:
 
     async def list_strategies(self) -> list[dict]:
         return list(self._strategies)
+
+    async def add_exchange_connection(
+        self,
+        *,
+        user_id: UUID,
+        exchange: str,
+        api_key_enc: bytes,
+        api_secret_enc: bytes,
+        ip_allowlist: list[str] | None = None,
+    ) -> dict:
+        record = {
+            "id": uuid4(),
+            "user_id": user_id,
+            "exchange": exchange,
+            "api_key_enc": bytes(api_key_enc),
+            "api_secret_enc": bytes(api_secret_enc),
+            "ip_allowlist": list(ip_allowlist) if ip_allowlist else None,
+            "status": "untested",
+            "last_tested_at": None,
+        }
+        self._connections.append(record)
+        # NEVER include the _enc fields in the return — caller turns this into the
+        # response shape, and the encrypted blobs only live in this store.
+        return {
+            "id": record["id"],
+            "user_id": record["user_id"],
+            "exchange": record["exchange"],
+            "status": record["status"],
+            "ip_allowlist": record["ip_allowlist"],
+        }
+
+    async def list_exchange_connections(self, *, user_id: UUID) -> list[dict]:
+        return [
+            {
+                "id": c["id"],
+                "user_id": c["user_id"],
+                "exchange": c["exchange"],
+                "status": c["status"],
+                "ip_allowlist": c["ip_allowlist"],
+                "last_tested_at": c["last_tested_at"],
+            }
+            for c in self._connections
+            if c["user_id"] == user_id
+        ]

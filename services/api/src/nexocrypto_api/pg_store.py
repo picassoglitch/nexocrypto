@@ -464,6 +464,58 @@ class PgStore:
         finally:
             await conn.close()
 
+    # ── exchange connections (encrypted at rest) ──────────────────────────
+
+    async def add_exchange_connection(
+        self,
+        *,
+        user_id: UUID,
+        exchange: str,
+        api_key_enc: bytes,
+        api_secret_enc: bytes,
+        ip_allowlist: list[str] | None = None,
+    ) -> dict:
+        """Insert an encrypted exchange connection. The encrypted blobs land in
+        api_key_enc / api_secret_enc bytea columns; the response NEVER includes them
+        (CLAUDE.md rule 7)."""
+        conn = await self._conn()
+        try:
+            await self._ensure_user(conn, user_id)
+            cur = await conn.execute(
+                """
+                insert into nexocrypto.exchange_connections
+                  (user_id, exchange, api_key_enc, api_secret_enc, ip_allowlist, status)
+                values (%s, %s, %s, %s, %s, 'untested')
+                returning id, user_id, exchange, ip_allowlist, status, last_tested_at,
+                          created_at
+                """,
+                (user_id, exchange, bytes(api_key_enc), bytes(api_secret_enc), ip_allowlist),
+            )
+            row = await cur.fetchone()
+            return self._json_safe(row)
+        finally:
+            await conn.close()
+
+    async def list_exchange_connections(self, *, user_id: UUID) -> list[dict]:
+        """List connections WITHOUT the encrypted secrets. Same response shape as
+        InMemoryStore so the API contract holds. NEVER select api_key_enc here."""
+        conn = await self._conn()
+        try:
+            await self._ensure_user(conn, user_id)
+            cur = await conn.execute(
+                """
+                select id, user_id, exchange, ip_allowlist, status, last_tested_at,
+                       created_at
+                  from nexocrypto.exchange_connections
+                 where user_id = %s
+                 order by created_at desc
+                """,
+                (user_id,),
+            )
+            return [self._json_safe(r) for r in await cur.fetchall()]
+        finally:
+            await conn.close()
+
     # ── helpers ────────────────────────────────────────────────────────────
 
     @staticmethod
