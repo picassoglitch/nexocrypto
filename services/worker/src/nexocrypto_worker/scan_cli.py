@@ -53,14 +53,6 @@ def _render(result: ScanResult) -> str:
 
 
 async def run(args: argparse.Namespace) -> int:
-    # Set selector loop policy on Windows for psycopg async compat (when --persist).
-    if args.persist and sys.platform == "win32":
-        import asyncio as _aio
-        try:
-            _aio.set_event_loop_policy(_aio.WindowsSelectorEventLoopPolicy())
-        except Exception:
-            pass
-
     store = None
     user_id = None
     if args.persist:
@@ -105,6 +97,14 @@ def main() -> int:
     p.add_argument("--user", default="11111111-1111-1111-1111-111111111111",
                    help="user UUID rows are persisted under (default: the demo user)")
     args = p.parse_args()
+    # psycopg async on Windows needs SelectorEventLoop (Proactor is the 3.8+ default
+    # and trips a clear error). Set the policy BEFORE asyncio.run() — once inside the
+    # loop, the policy change is a no-op for the current loop.
+    if args.persist and sys.platform == "win32":
+        try:
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        except Exception:
+            pass
     return asyncio.run(run(args))
 
 

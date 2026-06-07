@@ -39,12 +39,6 @@ async def _tick(venue, pair: str, tf: str, bars: int, store, user_id):
 
 
 async def run(args: argparse.Namespace) -> int:
-    if args.persist and sys.platform == "win32":
-        try:
-            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-        except Exception:
-            pass
-
     store = None
     user_id = None
     if args.persist:
@@ -102,6 +96,14 @@ def main() -> int:
     p.add_argument("--user", default="11111111-1111-1111-1111-111111111111",
                    help="user UUID rows are persisted under")
     args = p.parse_args()
+    # psycopg async on Windows needs SelectorEventLoop. Must be set BEFORE
+    # asyncio.run() — once inside the loop, set_event_loop_policy is a no-op
+    # for the current loop. See conftest.py for the same fix in tests.
+    if args.persist and sys.platform == "win32":
+        try:
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        except Exception:
+            pass
     try:
         return asyncio.run(run(args))
     except KeyboardInterrupt:

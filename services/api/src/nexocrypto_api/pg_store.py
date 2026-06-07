@@ -42,15 +42,29 @@ class PgStore:
         return await psycopg.AsyncConnection.connect(self._dsn, autocommit=True, row_factory=dict_row)
 
     async def _ensure_user(self, conn: psycopg.AsyncConnection, user_id: UUID) -> None:
-        """Insert user row if missing. Real Supabase path inserts auth.users at signup;
-        this is the test-friendly fallback so scanner runs don't break on a fresh DB.
+        """Insert user row if missing.
 
-        nexocrypto.users.id FKs to auth.users(id) so we seed both. On hosted Supabase
-        the auth row already exists and the insert is a no-op."""
-        await conn.execute(
-            "insert into auth.users (id) values (%s) on conflict (id) do nothing",
-            (user_id,),
+        Two modes, switched on NEXOCRYPTO_MANAGE_USERS (default 'true' for local/test):
+
+          true:  Insert into BOTH auth.users and nexocrypto.users (on conflict no-op).
+                 Required for local Postgres + tests where the auth shim is applied.
+
+          false: ONLY upsert nexocrypto.users. Supabase production owns auth.users via
+                 the managed auth service; app code MUST NOT write there. The user row
+                 in auth.users already exists from signup; this method just makes sure
+                 the mirror row in nexocrypto.users is there.
+        """
+        import os  # local import keeps the constructor fast-path uncomplicated
+
+        manage_users = (
+            os.environ.get("NEXOCRYPTO_MANAGE_USERS", "true").strip().lower()
+            in ("1", "true", "yes", "on")
         )
+        if manage_users:
+            await conn.execute(
+                "insert into auth.users (id) values (%s) on conflict (id) do nothing",
+                (user_id,),
+            )
         await conn.execute(
             "insert into nexocrypto.users (id) values (%s) on conflict (id) do nothing",
             (user_id,),

@@ -12,6 +12,7 @@ from .models import (
 from .dedup import dedup_hash
 from .config import Settings, get_settings
 from .fees import seed_fee_schedules
+from .vault import InvalidToken, SecretsVault, vault_from_env
 
 __all__ = [
     "MarginType",
@@ -27,7 +28,10 @@ __all__ = [
     "Signal",
     "TradeDecision",
     "dedup_hash",
+    "InvalidToken",
+    "SecretsVault",
     "Settings",
     "get_settings",
     "seed_fee_schedules",
+    "vault_from_env",
 ]

@@ -1,15 +1,35 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 
 from nexocrypto_shared import get_settings
 
 from .routes import router as api_router
 
+
+def _cors_origins() -> list[str]:
+    """Pulled from NEXOCRYPTO_CORS_ORIGINS (csv). Default = localhost-only so dev
+    works out of the box but production has to opt in explicitly."""
+    raw = os.environ.get(
+        "NEXOCRYPTO_CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000",
+    )
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
 app = FastAPI(title="NexoCrypto API", version="0.0.1")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-User-Id"],
+)
 app.include_router(api_router)
 
 _DASHBOARD_DIR = Path(__file__).parent / "dashboard"
