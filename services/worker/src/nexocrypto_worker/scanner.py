@@ -63,6 +63,7 @@ class StoreLike(Protocol):
 
     async def add_parsed_signal(self, *, user_id: UUID, signal, raw_text: str | None = None) -> dict: ...
     async def add_validated_signal(self, *, user_id: UUID, decision) -> dict: ...
+    async def add_approval(self, *, user_id: UUID, signal, decision) -> dict: ...
 
 
 @dataclass(frozen=True)
@@ -220,6 +221,11 @@ async def scan_once(
         if store is not None and user_id is not None:
             await store.add_parsed_signal(user_id=user_id, signal=sig)
             await store.add_validated_signal(user_id=user_id, decision=decision)
+            # Semi-auto: APPROVED entries queue for human review before any exchange
+            # write. Paper mode auto-simulates fills; full_auto is forbidden in MVP
+            # (CLAUDE.md rule 5). Rejected signals never enter the queue.
+            if mode == Mode.SEMI_AUTO and decision.approved:
+                await store.add_approval(user_id=user_id, signal=sig, decision=decision)
 
     return ScanResult(
         pair=pair,

@@ -13,9 +13,10 @@ from fastapi.testclient import TestClient
 from nexocrypto_api.deps import set_store_for_tests
 from nexocrypto_api.main import app
 from nexocrypto_api.pg_store import PgStore
+from nexocrypto_engine.risk import StrategyStats
 from nexocrypto_engine.strategy import EmaAdxTrendParams, EmaAdxTrendStrategy
 from nexocrypto_worker import scan_once
-from nexocrypto_shared import Kline
+from nexocrypto_shared import Kline, Mode
 
 from tests.strategy._helpers import flat_series, pullback_then_resume_uptrend
 
@@ -87,3 +88,97 @@ async def test_scanner_no_writes_when_store_is_none(client, pg_store):
     r = client.get("/api/signals", headers={"X-User-Id": str(user)})
     assert r.status_code == 200
     assert r.json() == []
+
+
+# ── semi-auto: scanner-approved signal queues for human review ─────────────
+
+
+async def test_semi_auto_approved_signal_lands_in_approvals_queue(client, pg_store):
+    """Full loop: SEMI_AUTO mode + approved decision + persistent store →
+    /api/approvals returns the queued row; POST /decision flips status."""
+    user = UUID("44444444-4444-4444-4444-444444444444")
+    src = _FakeSource(pullback_then_resume_uptrend())
+
+    # EV gate needs validated stats for live/semi-auto modes.
+    stats = StrategyStats(
+        strategy="ema_adx_trend",
+        sample_size=100,
+        win_rate=Decimal("0.55"),
+        avg_win_bps=Decimal("80"),
+        avg_loss_bps=Decimal("40"),
+    )
+
+    result = await scan_once(
+        src, "BTCUSDT", interval="5m", bars=300,
+        strategies=[(EmaAdxTrendStrategy(), EmaAdxTrendParams(adx_threshold=Decimal("15")))],
+        mode=Mode.SEMI_AUTO,
+        strategy_stats={"ema_adx_trend": stats},
+        now=NOW, store=pg_store, user_id=user,
+    )
+    fired_and_approved = [
+        o for o in result.outcomes if o.fired and o.decision and o.decision.approved
+    ]
+    assert fired_and_approved, "expected at least one approved decision in SEMI_AUTO"
+
+    # Queue should now contain the approval.
+    r = client.get("/api/approvals", headers={"X-User-Id": str(user)})
+    assert r.status_code == 200
+    approvals = r.json()
+    assert len(approvals) == 1
+    assert approvals[0]["pair"] == "BTCUSDT"
+    assert approvals[0]["status"] == "pending"
+    assert approvals[0]["side"] == "long"
+
+    # Resolve it via the API.
+    approval_id = approvals[0]["id"]
+    r = client.post(
+        f"/api/approvals/{approval_id}/decision",
+        headers={"X-User-Id": str(user)},
+        json={"action": "approve"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "approved"
+
+    # Queue is empty after resolution.
+    r = client.get("/api/approvals", headers={"X-User-Id": str(user)})
+    assert r.json() == []
+
+
+async def test_paper_mode_does_not_queue_approvals(client, pg_store):
+    """In PAPER mode, the scanner persists signals + decisions but DOES NOT create
+    approval rows — fills are auto-simulated. This guards against an accidental
+    semi-auto-only branch firing in paper too."""
+    user = UUID("55555555-5555-5555-5555-555555555555")
+    src = _FakeSource(pullback_then_resume_uptrend())
+
+    await scan_once(
+        src, "BTCUSDT", interval="5m", bars=300,
+        strategies=[(EmaAdxTrendStrategy(), EmaAdxTrendParams(adx_threshold=Decimal("15")))],
+        mode=Mode.PAPER,   # default, but explicit
+        now=NOW, store=pg_store, user_id=user,
+    )
+
+    r = client.get("/api/approvals", headers={"X-User-Id": str(user)})
+    assert r.status_code == 200
+    assert r.json() == []  # no approval queued in paper mode
+
+
+async def test_semi_auto_rejected_signal_does_not_queue(client, pg_store):
+    """RejectED signals must not enter the approval queue — only approved ones do."""
+    user = UUID("66666666-6666-6666-6666-666666666666")
+    src = _FakeSource(pullback_then_resume_uptrend())
+
+    # No stats → EV gate rejects for SEMI_AUTO with EV_STATS_UNKNOWN.
+    result = await scan_once(
+        src, "BTCUSDT", interval="5m", bars=300,
+        strategies=[(EmaAdxTrendStrategy(), EmaAdxTrendParams(adx_threshold=Decimal("15")))],
+        mode=Mode.SEMI_AUTO,
+        strategy_stats=None,
+        now=NOW, store=pg_store, user_id=user,
+    )
+    rejected = [o for o in result.outcomes if o.fired and o.decision and not o.decision.approved]
+    assert rejected, "expected a rejection on missing stats"
+
+    r = client.get("/api/approvals", headers={"X-User-Id": str(user)})
+    assert r.json() == []  # nothing queued — only approved entries go to humans

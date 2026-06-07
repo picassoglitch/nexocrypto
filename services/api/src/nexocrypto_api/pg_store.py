@@ -146,25 +146,122 @@ class PgStore:
             await conn.close()
 
     # ── approvals ─────────────────────────────────────────────────────────
+    # Real implementation against nexocrypto.approvals (migration 0003).
+
+    _APPROVAL_ACTION_STATUS = {
+        "approve": "approved",
+        "reject": "rejected",
+        "continue": "continued",
+        "close": "closed",
+        "breakeven": "breakeven",
+        "protect": "protected",
+    }
 
     async def list_approvals(self, *, user_id: UUID) -> list[dict]:
-        # Approvals live alongside validated_signals in the schema; for now we treat any
-        # validated 'approved' row whose mode is semi_auto as a pending approval. The
-        # semi-auto queue model graduates into its own table when we add it.
-        return []
+        conn = await self._conn()
+        try:
+            await self._ensure_user(conn, user_id)
+            cur = await conn.execute(
+                """
+                select id, user_id, signal_id, pair, side, entry, stop_loss, take_profits,
+                       leverage, qty, ev_net_bps, liquidation_distance_bps, strategy,
+                       idempotency_key, status, resolved_at, resolved_by, resolution_reason,
+                       created_at
+                  from nexocrypto.approvals
+                 where user_id = %s and status = 'pending'
+                 order by created_at desc
+                """,
+                (user_id,),
+            )
+            return [self._json_safe(r) for r in await cur.fetchall()]
+        finally:
+            await conn.close()
 
-    async def add_approval(self, *, user_id: UUID, signal: Signal, decision: TradeDecision) -> dict:
-        # No-op in v1; the scanner doesn't queue approvals yet (paper mode only).
-        return {
-            "id": uuid4(),
-            "user_id": user_id,
-            "status": "pending",
-            "signal_id": signal.id,
-            "pair": signal.pair,
-        }
+    async def add_approval(
+        self, *, user_id: UUID, signal: Signal, decision: TradeDecision
+    ) -> dict:
+        """Insert a pending approval. Idempotent on the decision's idempotency_key —
+        if the scanner re-runs the same tick, the second call returns the existing row
+        instead of raising."""
+        conn = await self._conn()
+        try:
+            await self._ensure_user(conn, user_id)
+            tps = [float(t) for t in signal.take_profits]
+            try:
+                cur = await conn.execute(
+                    """
+                    insert into nexocrypto.approvals
+                      (user_id, signal_id, pair, side, entry, stop_loss, take_profits,
+                       leverage, qty, ev_net_bps, liquidation_distance_bps, strategy,
+                       idempotency_key, status)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                    returning id, user_id, signal_id, pair, side, entry, stop_loss,
+                              take_profits, leverage, qty, ev_net_bps,
+                              liquidation_distance_bps, strategy, idempotency_key, status,
+                              created_at
+                    """,
+                    (
+                        user_id,
+                        signal.id,
+                        signal.pair,
+                        signal.side.value,
+                        float(signal.entry),
+                        float(signal.stop_loss),
+                        tps,
+                        float(decision.intended_leverage) if decision.intended_leverage else float(signal.leverage),
+                        float(decision.intended_qty) if decision.intended_qty else None,
+                        float(decision.ev_net_bps) if decision.ev_net_bps is not None else None,
+                        float(decision.liquidation_distance_bps) if decision.liquidation_distance_bps is not None else None,
+                        signal.strategy,
+                        decision.idempotency_key,
+                    ),
+                )
+            except psycopg.errors.UniqueViolation:
+                # Dedup on idempotency_key — return the existing row.
+                await conn.execute("rollback")  # in case autocommit didn't already
+                cur = await conn.execute(
+                    """
+                    select id, user_id, signal_id, pair, side, entry, stop_loss,
+                           take_profits, leverage, qty, ev_net_bps,
+                           liquidation_distance_bps, strategy, idempotency_key, status,
+                           created_at
+                      from nexocrypto.approvals
+                     where idempotency_key = %s
+                    """,
+                    (decision.idempotency_key,),
+                )
+            row = await cur.fetchone()
+            return self._json_safe(row)
+        finally:
+            await conn.close()
 
-    async def resolve_approval(self, *, user_id: UUID, approval_id: UUID, action: str, reason: str | None = None) -> dict | None:
-        return None  # placeholder until approvals table lands
+    async def resolve_approval(
+        self, *, user_id: UUID, approval_id: UUID, action: str, reason: str | None = None
+    ) -> dict | None:
+        new_status = self._APPROVAL_ACTION_STATUS.get(action)
+        if new_status is None:
+            return None
+        conn = await self._conn()
+        try:
+            await self._ensure_user(conn, user_id)
+            cur = await conn.execute(
+                """
+                update nexocrypto.approvals
+                   set status = %s,
+                       resolved_at = now(),
+                       resolved_by = coalesce(%s, 'human'),
+                       resolution_reason = %s
+                 where id = %s and user_id = %s and status = 'pending'
+                 returning id, user_id, signal_id, pair, side, entry, stop_loss,
+                           take_profits, leverage, qty, ev_net_bps, idempotency_key,
+                           status, resolved_at, resolved_by, resolution_reason, created_at
+                """,
+                (new_status, None, reason, approval_id, user_id),
+            )
+            row = await cur.fetchone()
+            return self._json_safe(row) if row else None
+        finally:
+            await conn.close()
 
     # ── execution ─────────────────────────────────────────────────────────
 
