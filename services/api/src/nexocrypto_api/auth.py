@@ -1,60 +1,102 @@
 """Supabase JWT verification.
 
-Supabase signs user JWTs with HS256 against the project's JWT secret (the same value
-exposed as `SUPABASE_JWT_SECRET` in their dashboard). Verifying that signature gives
-us the user's UUID from the `sub` claim — no callback to Supabase needed per request.
+Two verification paths, picked automatically based on env config:
 
-Two modes:
+  NEW (preferred — Supabase JWT Signing Keys):
+    Set NEXOCRYPTO_SUPABASE_URL=https://<ref>.supabase.co. We fetch the JWKS
+    from <url>/auth/v1/.well-known/jwks.json and verify with the published
+    public key. Algorithms: RS256, ES256 (whatever Supabase signed with).
+    PyJWKClient caches keys in-process so it's a single fetch per cold start.
+
+  LEGACY (compat — HS256 shared secret):
+    Set NEXOCRYPTO_SUPABASE_JWT_SECRET to the legacy JWT secret. Still supported
+    by Supabase for backward compat but you should migrate to JWKS — Supabase
+    deprecated the legacy secret in late 2025.
+
+Two modes for the dependency itself:
   - `jwt`  : verify a Bearer token (production)
   - `stub` : trust an `X-User-Id` header (local dev, tests, the dashboard demo)
 
-Selected by `NEXOCRYPTO_AUTH` env var; default `stub` so the existing local flow
-keeps working until you flip it.
+Selected by `NEXOCRYPTO_AUTH` env var; default `stub`.
 
-CLAUDE.md rule 7: the secret never leaves the server and never appears in logs.
+CLAUDE.md rule 7: secrets never leave the server and never appear in logs.
 """
 
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 from uuid import UUID
 
 import jwt
 from fastapi import Cookie, Header, HTTPException, status
+from jwt import PyJWKClient
 
 
 _DEFAULT_MODE = "stub"
-_JWT_ALG = "HS256"
 _JWT_AUDIENCE = "authenticated"  # Supabase default audience for user tokens
+_JWKS_ALGORITHMS = ["RS256", "ES256"]
 
 
 def _mode() -> str:
     return (os.environ.get("NEXOCRYPTO_AUTH") or _DEFAULT_MODE).strip().lower()
 
 
-def _jwt_secret() -> str:
-    secret = os.environ.get("NEXOCRYPTO_SUPABASE_JWT_SECRET")
-    if not secret:
+@lru_cache(maxsize=1)
+def _jwks_client_for(url: str) -> PyJWKClient:
+    """Cached per-URL JWKS client. PyJWKClient caches the JWKS internally too;
+    this LRU is just to avoid re-instantiation per request."""
+    return PyJWKClient(url, cache_keys=True, lifespan=3600)
+
+
+def _verify_with_jwks(token: str, supabase_url: str) -> dict:
+    jwks_url = f"{supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+    try:
+        signing_key = _jwks_client_for(jwks_url).get_signing_key_from_jwt(token).key
+    except jwt.PyJWKClientError as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="NEXOCRYPTO_AUTH=jwt but NEXOCRYPTO_SUPABASE_JWT_SECRET is unset",
-        )
-    return secret
+            detail=f"could not fetch Supabase JWKS: {e}",
+        ) from e
+    return jwt.decode(
+        token,
+        signing_key,
+        algorithms=_JWKS_ALGORITHMS,
+        audience=_JWT_AUDIENCE,
+        options={"require": ["sub", "exp"]},
+    )
+
+
+def _verify_with_legacy_secret(token: str, secret: str) -> dict:
+    return jwt.decode(
+        token,
+        secret,
+        algorithms=["HS256"],
+        audience=_JWT_AUDIENCE,
+        options={"require": ["sub", "exp"]},
+    )
 
 
 def _verify_bearer(token: str) -> UUID:
-    """Verify a Supabase HS256 JWT. Raise HTTPException 401 on any failure (expired,
-    bad signature, missing sub, wrong audience). NEVER raises into the route handler
-    with details that leak the secret."""
-    secret = _jwt_secret()
-    try:
-        claims = jwt.decode(
-            token,
-            secret,
-            algorithms=[_JWT_ALG],
-            audience=_JWT_AUDIENCE,
-            options={"require": ["sub", "exp"]},
+    """Verify a Supabase JWT. Raise HTTPException 401 on any failure.
+    Prefers JWKS (modern); falls back to legacy HS256 secret if URL is unset."""
+    supabase_url = os.environ.get("NEXOCRYPTO_SUPABASE_URL")
+    legacy_secret = os.environ.get("NEXOCRYPTO_SUPABASE_JWT_SECRET")
+
+    if not supabase_url and not legacy_secret:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                "NEXOCRYPTO_AUTH=jwt requires NEXOCRYPTO_SUPABASE_URL "
+                "(JWKS, preferred) or NEXOCRYPTO_SUPABASE_JWT_SECRET (legacy compat)"
+            ),
         )
+
+    try:
+        if supabase_url:
+            claims = _verify_with_jwks(token, supabase_url)
+        else:
+            claims = _verify_with_legacy_secret(token, legacy_secret)  # type: ignore[arg-type]
     except jwt.ExpiredSignatureError as e:
         raise HTTPException(status_code=401, detail="token expired") from e
     except jwt.InvalidAudienceError as e:

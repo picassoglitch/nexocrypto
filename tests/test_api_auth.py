@@ -150,6 +150,7 @@ def test_jwt_mode_rejects_non_uuid_sub(jwt_client):
 def test_jwt_mode_with_missing_server_secret_returns_500(jwt_client, monkeypatch):
     """If the operator misconfigures the deploy, fail loudly."""
     monkeypatch.delenv("NEXOCRYPTO_SUPABASE_JWT_SECRET", raising=False)
+    monkeypatch.delenv("NEXOCRYPTO_SUPABASE_URL", raising=False)
     token = _sign(
         {
             "sub": str(USER),
@@ -159,4 +160,94 @@ def test_jwt_mode_with_missing_server_secret_returns_500(jwt_client, monkeypatch
     )
     r = jwt_client.get("/api/signals", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 500
+    # Detail names BOTH env vars now (either is acceptable, neither = misconfig).
+    assert "NEXOCRYPTO_SUPABASE_URL" in r.json()["detail"]
     assert "NEXOCRYPTO_SUPABASE_JWT_SECRET" in r.json()["detail"]
+
+
+# ── new: JWKS path (preferred for current Supabase projects) ────────────
+
+
+@pytest.fixture
+def jwks_client_and_keys(monkeypatch):
+    """Set up a fresh RSA keypair, monkeypatch the JWKS client to serve the
+    public key, and configure the env vars for the JWKS verification path."""
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.backends import default_backend
+
+    private_key = rsa.generate_private_key(
+        public_exponent=65537, key_size=2048, backend=default_backend()
+    )
+    public_key = private_key.public_key()
+
+    # Mock PyJWKClient.get_signing_key_from_jwt to return our public key.
+    class _FakeSigningKey:
+        def __init__(self, key):
+            self.key = key
+
+    class _FakeJWKSClient:
+        def __init__(self, *a, **kw):
+            pass
+        def get_signing_key_from_jwt(self, token):
+            return _FakeSigningKey(public_key)
+
+    monkeypatch.setattr("nexocrypto_api.auth.PyJWKClient", _FakeJWKSClient)
+    # Also bust the lru_cache so a previous test's client doesn't stick.
+    import nexocrypto_api.auth as auth_mod
+    auth_mod._jwks_client_for.cache_clear()  # type: ignore[attr-defined]
+
+    monkeypatch.setenv("NEXOCRYPTO_AUTH", "jwt")
+    monkeypatch.setenv("NEXOCRYPTO_SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.delenv("NEXOCRYPTO_SUPABASE_JWT_SECRET", raising=False)
+
+    with TestClient(app) as c:
+        yield c, private_key
+
+
+def _sign_rs256(claims: dict, private_key) -> str:
+    return jwt.encode(claims, private_key, algorithm="RS256")
+
+
+def test_jwks_path_accepts_valid_rs256_token(jwks_client_and_keys):
+    c, priv = jwks_client_and_keys
+    token = _sign_rs256(
+        {
+            "sub": str(USER),
+            "aud": "authenticated",
+            "exp": int(time.time()) + 3600,
+            "iat": int(time.time()),
+        },
+        priv,
+    )
+    r = c.get("/api/signals", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200
+
+
+def test_jwks_path_rejects_expired_token(jwks_client_and_keys):
+    c, priv = jwks_client_and_keys
+    token = _sign_rs256(
+        {
+            "sub": str(USER),
+            "aud": "authenticated",
+            "exp": int(time.time()) - 60,
+            "iat": int(time.time()) - 120,
+        },
+        priv,
+    )
+    r = c.get("/api/signals", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 401
+    assert "expired" in r.json()["detail"]
+
+
+def test_jwks_path_rejects_wrong_audience(jwks_client_and_keys):
+    c, priv = jwks_client_and_keys
+    token = _sign_rs256(
+        {
+            "sub": str(USER),
+            "aud": "service",
+            "exp": int(time.time()) + 3600,
+        },
+        priv,
+    )
+    r = c.get("/api/signals", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 401
