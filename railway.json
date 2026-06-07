@@ -5,7 +5,7 @@
     "dockerfilePath": "services/api/Dockerfile"
   },
   "deploy": {
-    "startCommand": "uvicorn nexocrypto_api.main:app --host 0.0.0.0 --port 8000",
+    "startCommand": "sh -c 'uvicorn nexocrypto_api.main:app --host 0.0.0.0 --port ${PORT:-8080}'",
     "healthcheckPath": "/api/health",
     "healthcheckTimeout": 180,
     "restartPolicyType": "ON_FAILURE",
