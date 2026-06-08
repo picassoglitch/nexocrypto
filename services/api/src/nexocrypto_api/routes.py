@@ -351,6 +351,13 @@ async def proxy_indicators(
     adx_vals = adx(klines, period=14)
     macd_line, macd_signal, macd_hist = macd(klines, fast=12, slow=26, signal=9)
 
+    # Approximate volume delta from candle direction. Without trade-by-trade data
+    # this is the standard fallback Coinglass uses on lower-resolution streams.
+    volume_delta = []
+    for k in klines:
+        direction = 1 if k.close > k.open else (-1 if k.close < k.open else 0)
+        volume_delta.append(float(k.volume) * direction)
+
     def _sparse(values: list) -> list[dict]:
         return [
             {"time": times[i], "value": float(v)}
@@ -367,6 +374,9 @@ async def proxy_indicators(
             "hist": _sparse(macd_hist),
         },
         "adx": _sparse(adx_vals),
+        "volume_delta": [
+            {"time": times[i], "value": v} for i, v in enumerate(volume_delta)
+        ],
     }
 
 
@@ -400,13 +410,27 @@ async def coinglass_context(
             base = base[: -len(suffix)]
             break
 
-    from nexocrypto_connectors import CoinglassConnector
+    from nexocrypto_connectors import CoinglassConnector, ConnectorError
 
     venue = CoinglassConnector(api_key=api_key)
     try:
         oi = await venue.open_interest_history(base, interval=interval, exchange=exchange)
         funding = await venue.funding_oi_weighted_history(base, interval=interval)
         liqs = await venue.liquidations_aggregated_history(base, interval=interval)
+        # Long/short ratio + heatmap are higher-tier endpoints — degrade
+        # gracefully so the panel still loads if the plan can't reach them.
+        try:
+            ratio = await venue.long_short_ratio_history(
+                base, interval=interval, exchange=exchange
+            )
+        except ConnectorError:
+            ratio = []
+        try:
+            heatmap = await venue.liquidation_heatmap(
+                base, interval="12h", exchange=exchange
+            )
+        except ConnectorError:
+            heatmap = []
     finally:
         await venue.aclose()
 
@@ -427,6 +451,103 @@ async def coinglass_context(
                 "short_usd": float(r.short_liq_usd),
             }
             for r in liqs
+        ],
+        "long_short": [
+            {
+                "time": int(r.taken_at.timestamp()),
+                "long_pct": float(r.long_pct),
+                "short_pct": float(r.short_pct),
+            }
+            for r in ratio
+        ],
+        "heatmap": [
+            {"price": float(c.price), "amount_usd": float(c.leverage_amount_usd)}
+            for c in heatmap
+        ],
+    }
+
+
+@router.get("/orderbook/{pair}")
+async def proxy_orderbook(
+    pair: str,
+    limit: int = Query(default=50, ge=5, le=50),
+    _user_id: UUID = Depends(get_current_user_id),
+) -> dict:
+    """Bitunix native order book — the fill-gating book per CLAUDE.md §0.3.
+
+    Returned top-of-book is sorted: bids descending, asks ascending. Each level
+    includes a cumulative size so the dashboard can render depth shading without
+    recomputing on every render.
+    """
+    from nexocrypto_connectors.bitunix import BitunixConnector
+
+    venue = BitunixConnector()
+    try:
+        snap = await venue.order_book(pair, limit=limit)
+    finally:
+        await venue.aclose()
+
+    bids = sorted(snap.bids, key=lambda lvl: lvl.price, reverse=True)
+    asks = sorted(snap.asks, key=lambda lvl: lvl.price)
+
+    def _enrich(levels) -> list[dict]:
+        cum = 0.0
+        out: list[dict] = []
+        for lvl in levels:
+            cum += float(lvl.size)
+            out.append(
+                {"price": float(lvl.price), "size": float(lvl.size), "cumulative": cum}
+            )
+        return out
+
+    return {
+        "pair": snap.pair,
+        "taken_at": snap.taken_at.isoformat(),
+        "is_native": snap.is_native,
+        "bids": _enrich(bids),
+        "asks": _enrich(asks),
+    }
+
+
+@router.get("/news")
+async def proxy_news(
+    currencies: str = Query(default="BTC"),
+    limit: int = Query(default=20, ge=1, le=50),
+    _user_id: UUID = Depends(get_current_user_id),
+) -> dict:
+    """CryptoPanic news feed — context only, never a trading signal.
+
+    Returns 503 with structured payload when CRYPTOPANIC_API_KEY is unset so the
+    dashboard renders a graceful empty state instead of failing.
+    """
+    import os
+
+    api_key = os.environ.get("CRYPTOPANIC_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "cryptopanic_api_key_missing", "currencies": currencies},
+        )
+
+    from nexocrypto_connectors import CryptoPanicConnector
+
+    feed = CryptoPanicConnector(api_key=api_key)
+    try:
+        items = await feed.posts(currencies=currencies, limit=limit)
+    finally:
+        await feed.aclose()
+
+    return {
+        "currencies": currencies,
+        "items": [
+            {
+                "published_at": item.published_at.isoformat(),
+                "title": item.title,
+                "url": item.url,
+                "source": item.source,
+                "currencies": list(item.currencies),
+            }
+            for item in items
         ],
     }
 

@@ -56,6 +56,19 @@ class LiquidationBucket:
     short_liq_usd: Decimal
 
 
+@dataclass(frozen=True)
+class LongShortRatioPoint:
+    taken_at: datetime
+    long_pct: Decimal   # 0..100
+    short_pct: Decimal  # 0..100
+
+
+@dataclass(frozen=True)
+class LiquidationHeatmapCell:
+    price: Decimal
+    leverage_amount_usd: Decimal
+
+
 def _from_ms(ms: int | str) -> datetime:
     return datetime.fromtimestamp(int(ms) / 1000, tz=timezone.utc)
 
@@ -156,4 +169,72 @@ class CoinglassConnector:
                     short_liq_usd=Decimal(str(row.get("shortLiquidationUsd", "0"))),
                 )
             )
+        return out
+
+    async def long_short_ratio_history(
+        self, symbol: str, *, interval: str = "1h", exchange: str = "Binance"
+    ) -> list[LongShortRatioPoint]:
+        """Account-level long vs short ratio. Returns each point with long%/short%
+        summing to ~100. Used in the dashboard to show whether retail positioning
+        is skewed.
+
+        Endpoint: /api/futures/globalLongShortAccountRatio/history
+        """
+        data = await self._get(
+            "/api/futures/globalLongShortAccountRatio/history",
+            {"symbol": symbol, "interval": interval, "exchange": exchange},
+        )
+        out: list[LongShortRatioPoint] = []
+        for row in data or []:
+            long_acc = row.get("longAccount", row.get("longRatio", "0"))
+            short_acc = row.get("shortAccount", row.get("shortRatio", "0"))
+            out.append(
+                LongShortRatioPoint(
+                    taken_at=_from_ms(row.get("time", row.get("t", 0))),
+                    long_pct=Decimal(str(long_acc)),
+                    short_pct=Decimal(str(short_acc)),
+                )
+            )
+        return out
+
+    async def liquidation_heatmap(
+        self, symbol: str, *, interval: str = "12h", exchange: str = "Binance"
+    ) -> list[LiquidationHeatmapCell]:
+        """Price-level liquidation pressure: where forced unwinds would cluster
+        if price crossed those levels. Each cell is (price, est. leverage amount
+        in USD that would liquidate near it).
+
+        Endpoint: /api/futures/liquidation/heatmap/model1
+        Returns the most-recent snapshot's price→amount mapping.
+        """
+        data = await self._get(
+            "/api/futures/liquidation/heatmap/model1",
+            {"symbol": symbol, "interval": interval, "exchange": exchange},
+        )
+        # Coinglass returns either {"liq": [[price, amount, ...], ...]} or a
+        # nested structure depending on tier. Handle both shapes defensively.
+        rows = (
+            (data or {}).get("liq")
+            or (data or {}).get("data")
+            or []
+        )
+        out: list[LiquidationHeatmapCell] = []
+        for row in rows:
+            if isinstance(row, (list, tuple)) and len(row) >= 2:
+                price, amount = row[0], row[1]
+            elif isinstance(row, dict):
+                price = row.get("price", row.get("p", 0))
+                amount = row.get("amount", row.get("value", row.get("v", 0)))
+            else:
+                continue
+            try:
+                out.append(
+                    LiquidationHeatmapCell(
+                        price=Decimal(str(price)),
+                        leverage_amount_usd=Decimal(str(amount)),
+                    )
+                )
+            except Exception:
+                # Coinglass payloads occasionally include header rows; skip silently.
+                continue
         return out

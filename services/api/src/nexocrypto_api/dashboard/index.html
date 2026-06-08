@@ -147,7 +147,44 @@
       </div>
       <div id="chart-adx" class="w-full h-28 bg-slate-950 rounded border border-slate-800"></div>
 
+      <!-- Volume delta -->
+      <div class="flex items-center justify-between text-xs text-slate-500 mt-3 mb-1">
+        <span class="uppercase tracking-wide">Volumen delta</span>
+        <span id="last-vd" class="font-mono">—</span>
+      </div>
+      <div id="chart-vd" class="w-full h-28 bg-slate-950 rounded border border-slate-800"></div>
+
       <p id="chart-status" class="mt-3 text-xs text-slate-500">cargando…</p>
+    </section>
+
+    <!-- Order book ladder (full width) -->
+    <section class="md:col-span-3 bg-slate-900 rounded-xl border border-slate-800 p-5">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wide">
+          Order book — Bitunix nativo
+          <span id="ob-mid" class="ml-2 text-xs text-slate-500 normal-case font-normal">—</span>
+        </h2>
+        <span class="text-xs text-slate-500">libro de fills · refresco cada 2s</span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <div class="grid grid-cols-3 text-[10px] text-slate-500 uppercase tracking-wide mb-1 px-2">
+            <span>Bid (precio)</span>
+            <span class="text-right">Tamaño</span>
+            <span class="text-right">Acum.</span>
+          </div>
+          <div id="ob-bids" class="bg-slate-950 border border-slate-800 rounded font-mono text-xs"></div>
+        </div>
+        <div>
+          <div class="grid grid-cols-3 text-[10px] text-slate-500 uppercase tracking-wide mb-1 px-2">
+            <span>Ask (precio)</span>
+            <span class="text-right">Tamaño</span>
+            <span class="text-right">Acum.</span>
+          </div>
+          <div id="ob-asks" class="bg-slate-950 border border-slate-800 rounded font-mono text-xs"></div>
+        </div>
+      </div>
+      <p id="ob-status" class="mt-3 text-xs text-slate-500">cargando…</p>
     </section>
 
     <!-- Coinglass context (full width) — OI, funding, liquidations -->
@@ -200,6 +237,30 @@
             <span class="text-emerald-400">▲ shorts</span> · USD por barra
           </p>
         </div>
+
+        <!-- Long/Short ratio -->
+        <div class="bg-slate-950 border border-slate-800 rounded p-3 md:col-span-1">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs text-slate-500 uppercase tracking-wide">Long / Short</span>
+            <span id="cg-ratio-last" class="text-sm font-mono">—</span>
+          </div>
+          <div class="h-6 flex rounded overflow-hidden bg-slate-800">
+            <div id="cg-ratio-long" class="bg-emerald-500/70" style="width:50%"></div>
+            <div id="cg-ratio-short" class="bg-rose-500/70" style="width:50%"></div>
+          </div>
+          <div id="cg-ratio-chart" class="w-full h-16 mt-1"></div>
+          <p class="mt-1 text-[10px] text-slate-600">cuentas globales · ¿el retail está sesgado?</p>
+        </div>
+
+        <!-- Liquidation heatmap -->
+        <div class="bg-slate-950 border border-slate-800 rounded p-3 md:col-span-2">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs text-slate-500 uppercase tracking-wide">Mapa de liquidaciones</span>
+            <span id="cg-heat-status" class="text-[10px] text-slate-600">—</span>
+          </div>
+          <div id="cg-heat" class="w-full h-24 overflow-y-auto bg-slate-900/40 rounded p-2 space-y-1"></div>
+          <p class="mt-1 text-[10px] text-slate-600">por nivel de precio · barras anchas = más apalancamiento amenazado</p>
+        </div>
       </div>
 
       <p id="cg-status" class="mt-3 text-xs text-slate-500">cargando…</p>
@@ -214,6 +275,22 @@
       <div id="approvals-body" class="text-sm">
         <p class="text-slate-500 italic">sin aprobaciones pendientes — el motor está en modo papel</p>
       </div>
+    </section>
+
+    <!-- News feed (full width) -->
+    <section class="md:col-span-3 bg-slate-900 rounded-xl border border-slate-800 p-5">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wide">
+          Noticias · BTC
+        </h2>
+        <span class="text-xs text-slate-500">contexto, no señal · CryptoPanic</span>
+      </div>
+      <div id="news-empty" class="hidden bg-amber-950/30 border border-amber-800/40 rounded p-3 text-xs text-amber-300">
+        <b>CRYPTOPANIC_API_KEY no configurada.</b> Crea una cuenta gratuita en cryptopanic.com,
+        copia tu token desde el perfil y añádelo en Railway · Variables.
+      </div>
+      <ul id="news-list" class="space-y-2 max-h-96 overflow-y-auto"></ul>
+      <p id="news-status" class="mt-3 text-xs text-slate-500">cargando…</p>
     </section>
 
     <!-- Signals (full width) -->
@@ -430,6 +507,7 @@
     const rsiC   = LightweightCharts.createChart($("chart-rsi"),    chartTheme);
     const macdC  = LightweightCharts.createChart($("chart-macd"),   chartTheme);
     const adxC   = LightweightCharts.createChart($("chart-adx"),    chartTheme);
+    const vdC    = LightweightCharts.createChart($("chart-vd"),     chartTheme);
 
     const candleSeries = candle.addCandlestickSeries({
       upColor: "#34d399", downColor: "#f87171",
@@ -438,7 +516,6 @@
     });
 
     const rsiSeries = rsiC.addLineSeries({ color: "#a78bfa", lineWidth: 2 });
-    // Overbought / oversold guide lines.
     rsiSeries.createPriceLine({ price: 70, color: "#475569", lineStyle: 2, axisLabelVisible: false });
     rsiSeries.createPriceLine({ price: 30, color: "#475569", lineStyle: 2, axisLabelVisible: false });
 
@@ -449,8 +526,10 @@
     const adxSeries = adxC.addLineSeries({ color: "#22d3ee", lineWidth: 2 });
     adxSeries.createPriceLine({ price: 25, color: "#475569", lineStyle: 2, axisLabelVisible: false });
 
-    charts = [candle, rsiC, macdC, adxC];
-    series = { candle: candleSeries, rsi: rsiSeries, macdLine, macdSignal, macdHist, adx: adxSeries };
+    const vdSeries = vdC.addHistogramSeries({ priceFormat: { type: "volume" } });
+
+    charts = [candle, rsiC, macdC, adxC, vdC];
+    series = { candle: candleSeries, rsi: rsiSeries, macdLine, macdSignal, macdHist, adx: adxSeries, vd: vdSeries };
 
     // Sync all time scales — one chart's pan/zoom drives the others.
     let syncing = false;
@@ -495,10 +574,26 @@
       series.macdHist.setData(colorHistRows((j.macd?.hist || []).slice().sort((a, b) => a.time - b.time)));
       series.adx.setData((j.adx || []).slice().sort((a, b) => a.time - b.time));
 
+      const vdRows = (j.volume_delta || []).slice().sort((a, b) => a.time - b.time);
+      series.vd.setData(vdRows.map(r => ({
+        time: r.time,
+        value: r.value,
+        color: r.value >= 0 ? "#34d399" : "#f87171",
+      })));
+
       // Update "last value" readouts.
       const last = (arr) => (arr && arr.length ? arr[arr.length - 1] : null);
       const lastCandle = last(candles);
       $("last-close").textContent = lastCandle ? fmt(lastCandle.close) : "—";
+      lastCloseForHeat = lastCandle ? Number(lastCandle.close) : null;
+
+      const lastVd = last(vdRows);
+      if (lastVd) {
+        $("last-vd").textContent = (lastVd.value >= 0 ? "+" : "") + cgFmtUsd.format(lastVd.value);
+        $("last-vd").className = "font-mono " + (lastVd.value >= 0 ? "text-emerald-400" : "text-rose-400");
+      } else {
+        $("last-vd").textContent = "—";
+      }
 
       const lastRsi = last(j.rsi);
       const rsiVal = lastRsi ? Number(lastRsi.value) : null;
@@ -545,17 +640,25 @@
     const oi = LightweightCharts.createChart($("cg-oi-chart"), cgMiniTheme);
     const fd = LightweightCharts.createChart($("cg-funding-chart"), cgMiniTheme);
     const lq = LightweightCharts.createChart($("cg-liq-chart"), cgMiniTheme);
-    cgCharts = [oi, fd, lq];
+    const rt = LightweightCharts.createChart($("cg-ratio-chart"), cgMiniTheme);
+    cgCharts = [oi, fd, lq, rt];
     cgSeries = {
       oi: oi.addAreaSeries({ topColor: "rgba(96,165,250,0.4)", bottomColor: "rgba(96,165,250,0.02)", lineColor: "#60a5fa", lineWidth: 2 }),
       funding: fd.addLineSeries({ color: "#fbbf24", lineWidth: 2 }),
       liqLong: lq.addHistogramSeries({ color: "#f87171", priceFormat: { type: "volume" } }),
       liqShort: lq.addHistogramSeries({ color: "#34d399", priceFormat: { type: "volume" } }),
+      ratioLong: rt.addLineSeries({ color: "#34d399", lineWidth: 1 }),
+      ratioShort: rt.addLineSeries({ color: "#f87171", lineWidth: 1 }),
     };
   }
 
   const cgFmtUsd = new Intl.NumberFormat("es-MX", { notation: "compact", maximumFractionDigits: 2 });
   const cgFmtPct = new Intl.NumberFormat("es-MX", { style: "percent", maximumFractionDigits: 4, signDisplay: "exceptZero" });
+
+  // Module-level cache of the chart's last close so the heatmap can color
+  // levels relative to current price without re-fetching the chart.
+  let lastCloseForHeat = null;
+  function lastCandleForHeat() { return lastCloseForHeat; }
 
   function cgShowEmpty(message) {
     $("cg-empty").classList.remove("hidden");
@@ -621,6 +724,49 @@
       $("cg-liq-last").textContent = lastLiq
         ? `L ${cgFmtUsd.format(lastLiq.long_usd)} · S ${cgFmtUsd.format(lastLiq.short_usd)}`
         : "—";
+
+      // Long/short ratio — bar + history line.
+      const lsRows = sortByTime(j.long_short);
+      if (lsRows.length) {
+        cgSeries.ratioLong.setData(lsRows.map(r => ({ time: r.time, value: r.long_pct })));
+        cgSeries.ratioShort.setData(lsRows.map(r => ({ time: r.time, value: r.short_pct })));
+        const lastLs = lsRows[lsRows.length - 1];
+        const total = lastLs.long_pct + lastLs.short_pct || 1;
+        const longPct = (lastLs.long_pct / total) * 100;
+        $("cg-ratio-long").style.width = longPct.toFixed(1) + "%";
+        $("cg-ratio-short").style.width = (100 - longPct).toFixed(1) + "%";
+        $("cg-ratio-last").textContent =
+          `L ${lastLs.long_pct.toFixed(1)}% · S ${lastLs.short_pct.toFixed(1)}%`;
+      } else {
+        $("cg-ratio-last").textContent = "datos no disponibles en este plan";
+      }
+
+      // Liquidation heatmap — sorted by amount, rendered as horizontal bars.
+      const heat = (j.heatmap || []).slice().sort((a, b) => b.amount_usd - a.amount_usd).slice(0, 20);
+      const heatEl = $("cg-heat");
+      if (heat.length) {
+        const maxAmt = heat[0].amount_usd || 1;
+        const refPrice = lastCandleForHeat();
+        heatEl.innerHTML = heat
+          .sort((a, b) => b.price - a.price)
+          .map(c => {
+            const pct = Math.min(100, (c.amount_usd / maxAmt) * 100);
+            const above = refPrice !== null && c.price > refPrice;
+            const colorClass = above ? "bg-emerald-500/40" : "bg-rose-500/40";
+            return `
+              <div class="relative h-4 rounded overflow-hidden bg-slate-800/40">
+                <div class="absolute inset-y-0 left-0 ${colorClass}" style="width:${pct.toFixed(1)}%"></div>
+                <div class="relative z-10 px-2 flex items-center justify-between text-[10px] text-slate-300">
+                  <span class="font-mono">${cgFmtUsd.format(c.price)}</span>
+                  <span class="font-mono">${cgFmtUsd.format(c.amount_usd)}</span>
+                </div>
+              </div>`;
+          }).join("");
+        $("cg-heat-status").textContent = `${heat.length} niveles · top por apalancamiento`;
+      } else {
+        heatEl.innerHTML = `<p class="text-[10px] text-slate-500 italic">datos no disponibles en este plan</p>`;
+        $("cg-heat-status").textContent = "—";
+      }
 
       $("cg-status").textContent = `${j.symbol} · ${oiRows.length} velas · actualizado ${new Date().toLocaleTimeString("es-MX")}`;
     } catch (e) {
@@ -693,8 +839,102 @@
     }
   }
 
+  // ── Order book ladder (polling) ──────────────────────────────────────
+  async function loadOrderbook() {
+    const pair = $("chart-pair").value.trim().toUpperCase();
+    try {
+      const r = await fetch(`${base}/api/orderbook/${pair}?limit=50`, { headers: headers() });
+      if (!r.ok) throw new Error("status " + r.status);
+      const j = await r.json();
+      const bids = (j.bids || []).slice(0, 20);
+      const asks = (j.asks || []).slice(0, 20);
+      const maxCum = Math.max(
+        bids.length ? bids[bids.length - 1].cumulative : 0,
+        asks.length ? asks[asks.length - 1].cumulative : 0,
+        1,
+      );
+      const renderRow = (lvl, color) => {
+        const widthPct = Math.min(100, (lvl.cumulative / maxCum) * 100);
+        return `
+          <div class="relative grid grid-cols-3 px-2 py-0.5 border-b border-slate-800/40">
+            <div class="absolute inset-y-0 ${color === "green" ? "left-0" : "right-0"} ${color === "green" ? "bg-emerald-500/15" : "bg-rose-500/15"}" style="width:${widthPct.toFixed(1)}%"></div>
+            <span class="relative ${color === "green" ? "text-emerald-300" : "text-rose-300"}">${fmt(lvl.price)}</span>
+            <span class="relative text-right text-slate-300">${fmt(lvl.size)}</span>
+            <span class="relative text-right text-slate-500">${fmt(lvl.cumulative)}</span>
+          </div>`;
+      };
+      $("ob-bids").innerHTML = bids.map(b => renderRow(b, "green")).join("");
+      $("ob-asks").innerHTML = asks.map(a => renderRow(a, "red")).join("");
+      if (bids.length && asks.length) {
+        const mid = (bids[0].price + asks[0].price) / 2;
+        const spreadBps = ((asks[0].price - bids[0].price) / mid) * 10000;
+        $("ob-mid").textContent = `· mid ${fmt(mid)} · spread ${spreadBps.toFixed(2)} bps`;
+      }
+      $("ob-status").textContent = `${pair} · ${bids.length} bid / ${asks.length} ask · actualizado ${new Date().toLocaleTimeString("es-MX")}`;
+    } catch (e) {
+      $("ob-status").textContent = `error: ${e.message}`;
+    }
+  }
+
+  // ── News feed ────────────────────────────────────────────────────────
+  function fmtAgo(iso) {
+    try {
+      const t = new Date(iso).getTime();
+      const sec = Math.max(1, Math.floor((Date.now() - t) / 1000));
+      if (sec < 60) return `${sec}s`;
+      const m = Math.floor(sec / 60);
+      if (m < 60) return `${m}m`;
+      const h = Math.floor(m / 60);
+      if (h < 24) return `${h}h`;
+      return `${Math.floor(h / 24)}d`;
+    } catch { return ""; }
+  }
+
+  async function loadNews() {
+    try {
+      const r = await fetch(`${base}/api/news?currencies=BTC&limit=25`, { headers: headers() });
+      if (r.status === 503) {
+        const j = await r.json().catch(() => ({}));
+        if (j?.detail?.error === "cryptopanic_api_key_missing") {
+          $("news-empty").classList.remove("hidden");
+          $("news-list").innerHTML = "";
+          $("news-status").textContent = "—";
+          return;
+        }
+      }
+      if (!r.ok) throw new Error("status " + r.status);
+      const j = await r.json();
+      $("news-empty").classList.add("hidden");
+      const items = j.items || [];
+      if (!items.length) {
+        $("news-list").innerHTML = `<li class="text-slate-500 italic text-sm">sin noticias recientes</li>`;
+      } else {
+        $("news-list").innerHTML = items.map(n => `
+          <li class="border-b border-slate-800/40 pb-2">
+            <a href="${n.url}" target="_blank" rel="noopener noreferrer"
+               class="text-sm text-slate-200 hover:text-emerald-300 leading-snug block">
+              ${n.title}
+            </a>
+            <div class="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
+              <span>${n.source || "—"}</span>
+              <span>·</span>
+              <span>${fmtAgo(n.published_at)}</span>
+              ${n.currencies && n.currencies.length ? `<span>·</span><span class="font-mono">${n.currencies.join(", ")}</span>` : ""}
+            </div>
+          </li>
+        `).join("");
+      }
+      $("news-status").textContent = `${items.length} ítems · actualizado ${new Date().toLocaleTimeString("es-MX")}`;
+    } catch (e) {
+      $("news-status").textContent = `error: ${e.message}`;
+    }
+  }
+
   async function refreshAll() {
-    await Promise.all([loadHealth(), loadMode(), loadStrategies(), loadSignals(), loadApprovals(), loadChart(), loadCoinglass()]);
+    await Promise.all([
+      loadHealth(), loadMode(), loadStrategies(), loadSignals(), loadApprovals(),
+      loadChart(), loadCoinglass(), loadOrderbook(), loadNews(),
+    ]);
   }
   refreshAll();
   setInterval(loadSignals, 5000);
@@ -702,6 +942,8 @@
   setInterval(loadHealth, 10000);
   setInterval(loadChart, 30000);     // refresh chart every 30s
   setInterval(loadCoinglass, 60000); // refresh Coinglass context every 60s
+  setInterval(loadOrderbook, 2000);  // ladder polled every 2s (WS streaming = phase 8)
+  setInterval(loadNews, 90000);      // news every 90s
 </script>
 </body>
 </html>
