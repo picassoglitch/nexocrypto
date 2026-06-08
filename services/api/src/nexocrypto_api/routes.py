@@ -370,6 +370,67 @@ async def proxy_indicators(
     }
 
 
+@router.get("/coinglass/{symbol}")
+async def coinglass_context(
+    symbol: str,
+    interval: str = Query(default="1h"),
+    exchange: str = Query(default="Binance"),
+    _user_id: UUID = Depends(get_current_user_id),
+) -> dict:
+    """Coinglass derivatives context: OI series, OI-weighted funding, aggregated
+    liquidations. **Context only** — CLAUDE.md §0.3 forbids using Coinglass data
+    for fill gating (snapshots are ≤1-min, not execution-grade).
+
+    Normalizes the user-facing pair (e.g. BTCUSDT) to Coinglass's base-coin
+    convention (BTC). Returns 503 with a structured payload if the API key isn't
+    configured so the dashboard can show a graceful empty state.
+    """
+    import os
+
+    api_key = os.environ.get("COINGLASS_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "coinglass_api_key_missing", "symbol": symbol},
+        )
+
+    base = symbol.upper()
+    for suffix in ("USDT", "USDC", "USD"):
+        if base.endswith(suffix) and len(base) > len(suffix):
+            base = base[: -len(suffix)]
+            break
+
+    from nexocrypto_connectors import CoinglassConnector
+
+    venue = CoinglassConnector(api_key=api_key)
+    try:
+        oi = await venue.open_interest_history(base, interval=interval, exchange=exchange)
+        funding = await venue.funding_oi_weighted_history(base, interval=interval)
+        liqs = await venue.liquidations_aggregated_history(base, interval=interval)
+    finally:
+        await venue.aclose()
+
+    return {
+        "symbol": base,
+        "interval": interval,
+        "oi": [
+            {"time": int(r.taken_at.timestamp()), "value": float(r.close)} for r in oi
+        ],
+        "funding": [
+            {"time": int(r.taken_at.timestamp()), "value": float(r.weighted_rate)}
+            for r in funding
+        ],
+        "liquidations": [
+            {
+                "time": int(r.taken_at.timestamp()),
+                "long_usd": float(r.long_liq_usd),
+                "short_usd": float(r.short_liq_usd),
+            }
+            for r in liqs
+        ],
+    }
+
+
 @router.get("/stream")
 async def stream(
     _user_id: UUID = Depends(get_current_user_id),

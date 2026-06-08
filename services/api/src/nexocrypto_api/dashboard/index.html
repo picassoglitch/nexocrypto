@@ -150,6 +150,61 @@
       <p id="chart-status" class="mt-3 text-xs text-slate-500">cargando…</p>
     </section>
 
+    <!-- Coinglass context (full width) — OI, funding, liquidations -->
+    <section class="md:col-span-3 bg-slate-900 rounded-xl border border-slate-800 p-5">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wide">
+          Contexto Coinglass
+          <span id="cg-symbol" class="ml-2 text-xs text-slate-500 normal-case font-normal">—</span>
+        </h2>
+        <span class="text-xs text-slate-500">contexto, no fuente de fill · sigue el par del gráfico</span>
+      </div>
+
+      <!-- Empty / error state (hidden by default; shown when API key missing) -->
+      <div id="cg-empty" class="hidden bg-amber-950/30 border border-amber-800/40 rounded p-3 text-xs text-amber-300">
+        <b>COINGLASS_API_KEY no configurada.</b> Añádela en Railway (servicio nexocrypto · Variables)
+        para activar OI, funding agregado y liquidaciones. Requiere plan Standard ($299/mo) para uso comercial
+        en nexo-ai.world.
+      </div>
+
+      <div id="cg-grid" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <!-- Open Interest -->
+        <div class="bg-slate-950 border border-slate-800 rounded p-3">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs text-slate-500 uppercase tracking-wide">Open Interest</span>
+            <span id="cg-oi-last" class="text-sm font-mono text-slate-200">—</span>
+          </div>
+          <div id="cg-oi-chart" class="w-full h-24"></div>
+          <p class="mt-1 text-[10px] text-slate-600">cierre últimas 24 velas</p>
+        </div>
+
+        <!-- Funding (OI-weighted) -->
+        <div class="bg-slate-950 border border-slate-800 rounded p-3">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs text-slate-500 uppercase tracking-wide">Funding agregado</span>
+            <span id="cg-funding-last" class="text-sm font-mono">—</span>
+          </div>
+          <div id="cg-funding-chart" class="w-full h-24"></div>
+          <p class="mt-1 text-[10px] text-slate-600">rate ponderado por OI · positivo = longs pagan</p>
+        </div>
+
+        <!-- Liquidations -->
+        <div class="bg-slate-950 border border-slate-800 rounded p-3">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs text-slate-500 uppercase tracking-wide">Liquidaciones</span>
+            <span id="cg-liq-last" class="text-sm font-mono text-slate-200">—</span>
+          </div>
+          <div id="cg-liq-chart" class="w-full h-24"></div>
+          <p class="mt-1 text-[10px] text-slate-600">
+            <span class="text-rose-400">▼ longs</span> ·
+            <span class="text-emerald-400">▲ shorts</span> · USD por barra
+          </p>
+        </div>
+      </div>
+
+      <p id="cg-status" class="mt-3 text-xs text-slate-500">cargando…</p>
+    </section>
+
     <!-- Approvals (full width) -->
     <section class="md:col-span-3 bg-slate-900 rounded-xl border border-slate-800 p-5">
       <div class="flex items-center justify-between mb-3">
@@ -468,8 +523,110 @@
   }
 
   $("chart-refresh").addEventListener("click", loadChart);
-  $("chart-pair").addEventListener("change", loadChart);
+  $("chart-pair").addEventListener("change", () => { loadChart(); loadCoinglass(); });
   $("chart-tf").addEventListener("change", loadChart);
+
+  // ── Coinglass context panel ──────────────────────────────────────────
+  const cgMiniTheme = {
+    layout: { background: { color: "#020617" }, textColor: "#64748b", fontSize: 10 },
+    grid: { vertLines: { visible: false }, horzLines: { color: "#1e293b" } },
+    rightPriceScale: { borderColor: "#1e293b", visible: true },
+    timeScale: { borderColor: "#1e293b", visible: false },
+    crosshair: { mode: 0 },
+    handleScale: false,
+    handleScroll: false,
+    autoSize: true,
+  };
+
+  let cgCharts = null;
+  let cgSeries = null;
+  function initCoinglassCharts() {
+    if (cgCharts) return;
+    const oi = LightweightCharts.createChart($("cg-oi-chart"), cgMiniTheme);
+    const fd = LightweightCharts.createChart($("cg-funding-chart"), cgMiniTheme);
+    const lq = LightweightCharts.createChart($("cg-liq-chart"), cgMiniTheme);
+    cgCharts = [oi, fd, lq];
+    cgSeries = {
+      oi: oi.addAreaSeries({ topColor: "rgba(96,165,250,0.4)", bottomColor: "rgba(96,165,250,0.02)", lineColor: "#60a5fa", lineWidth: 2 }),
+      funding: fd.addLineSeries({ color: "#fbbf24", lineWidth: 2 }),
+      liqLong: lq.addHistogramSeries({ color: "#f87171", priceFormat: { type: "volume" } }),
+      liqShort: lq.addHistogramSeries({ color: "#34d399", priceFormat: { type: "volume" } }),
+    };
+  }
+
+  const cgFmtUsd = new Intl.NumberFormat("es-MX", { notation: "compact", maximumFractionDigits: 2 });
+  const cgFmtPct = new Intl.NumberFormat("es-MX", { style: "percent", maximumFractionDigits: 4, signDisplay: "exceptZero" });
+
+  function cgShowEmpty(message) {
+    $("cg-empty").classList.remove("hidden");
+    $("cg-grid").classList.add("hidden");
+    if (message) {
+      $("cg-empty").innerHTML = `<b>${message}</b>`;
+    }
+    $("cg-status").textContent = "—";
+  }
+
+  function cgShowData() {
+    $("cg-empty").classList.add("hidden");
+    $("cg-grid").classList.remove("hidden");
+  }
+
+  async function loadCoinglass() {
+    const pair = $("chart-pair").value.trim().toUpperCase();
+    $("cg-status").textContent = `cargando ${pair}…`;
+    try {
+      const r = await fetch(`${base}/api/coinglass/${pair}?interval=1h`, { headers: headers() });
+      if (r.status === 503) {
+        const j = await r.json().catch(() => ({}));
+        const err = j?.detail?.error;
+        if (err === "coinglass_api_key_missing") {
+          cgShowEmpty("COINGLASS_API_KEY no configurada en Railway.");
+        } else {
+          cgShowEmpty(`Servicio Coinglass no disponible (${err || "503"}).`);
+        }
+        return;
+      }
+      if (!r.ok) throw new Error("status " + r.status);
+      const j = await r.json();
+      initCoinglassCharts();
+      cgShowData();
+
+      $("cg-symbol").textContent = `· ${j.symbol} · ${j.interval}`;
+
+      const sortByTime = (rows) => (rows || []).slice().sort((a, b) => a.time - b.time);
+      const oiRows = sortByTime(j.oi).map(r => ({ time: r.time, value: r.value }));
+      const fdRows = sortByTime(j.funding).map(r => ({ time: r.time, value: r.value }));
+      const liqRows = sortByTime(j.liquidations);
+
+      cgSeries.oi.setData(oiRows);
+      cgSeries.funding.setData(fdRows);
+      // Long liquidations as negative bars (red, below 0), shorts as positive (green, above 0).
+      cgSeries.liqLong.setData(liqRows.map(r => ({ time: r.time, value: -Math.abs(r.long_usd) })));
+      cgSeries.liqShort.setData(liqRows.map(r => ({ time: r.time, value: r.short_usd })));
+
+      // Last-value readouts.
+      const lastOi = oiRows[oiRows.length - 1];
+      $("cg-oi-last").textContent = lastOi ? cgFmtUsd.format(lastOi.value) : "—";
+
+      const lastFd = fdRows[fdRows.length - 1];
+      if (lastFd) {
+        $("cg-funding-last").textContent = cgFmtPct.format(lastFd.value);
+        $("cg-funding-last").className = "text-sm font-mono " + (lastFd.value >= 0 ? "text-emerald-400" : "text-rose-400");
+      } else {
+        $("cg-funding-last").textContent = "—";
+        $("cg-funding-last").className = "text-sm font-mono text-slate-400";
+      }
+
+      const lastLiq = liqRows[liqRows.length - 1];
+      $("cg-liq-last").textContent = lastLiq
+        ? `L ${cgFmtUsd.format(lastLiq.long_usd)} · S ${cgFmtUsd.format(lastLiq.short_usd)}`
+        : "—";
+
+      $("cg-status").textContent = `${j.symbol} · ${oiRows.length} velas · actualizado ${new Date().toLocaleTimeString("es-MX")}`;
+    } catch (e) {
+      $("cg-status").textContent = `error: ${e.message}`;
+    }
+  }
 
   // ── approvals ────────────────────────────────────────────────────────
   async function loadApprovals() {
@@ -537,13 +694,14 @@
   }
 
   async function refreshAll() {
-    await Promise.all([loadHealth(), loadMode(), loadStrategies(), loadSignals(), loadApprovals(), loadChart()]);
+    await Promise.all([loadHealth(), loadMode(), loadStrategies(), loadSignals(), loadApprovals(), loadChart(), loadCoinglass()]);
   }
   refreshAll();
   setInterval(loadSignals, 5000);
   setInterval(loadApprovals, 10000);
   setInterval(loadHealth, 10000);
-  setInterval(loadChart, 30000);  // refresh chart every 30s
+  setInterval(loadChart, 30000);     // refresh chart every 30s
+  setInterval(loadCoinglass, 60000); // refresh Coinglass context every 60s
 </script>
 </body>
 </html>
