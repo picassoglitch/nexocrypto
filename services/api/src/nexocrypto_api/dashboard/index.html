@@ -98,9 +98,9 @@
       </p>
     </section>
 
-    <!-- Chart (full width) -->
+    <!-- Chart (full width) — multi-pane: candles + RSI + MACD + ADX -->
     <section class="md:col-span-3 bg-slate-900 rounded-xl border border-slate-800 p-5">
-      <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
         <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wide">Gráfico — Bitunix nativo</h2>
         <div class="flex items-center gap-2 text-xs">
           <input id="chart-pair" value="BTCUSDT" class="bg-slate-950 border border-slate-800 rounded px-2 py-1 w-24 font-mono uppercase" />
@@ -108,15 +108,46 @@
             <option value="1m">1m</option>
             <option value="5m" selected>5m</option>
             <option value="15m">15m</option>
+            <option value="30m">30m</option>
             <option value="1h">1h</option>
             <option value="4h">4h</option>
+            <option value="1d">1D</option>
+            <option value="1w">1W</option>
           </select>
           <button id="chart-refresh" class="bg-slate-800 hover:bg-slate-700 rounded px-2 py-1">↻</button>
           <span class="text-slate-500">CLAUDE.md §0.3: libro nativo = fuente de fill</span>
         </div>
       </div>
-      <div id="chart" class="w-full h-72 bg-slate-950 rounded border border-slate-800"></div>
-      <p id="chart-status" class="mt-2 text-xs text-slate-500">cargando…</p>
+
+      <!-- Candles -->
+      <div class="flex items-center justify-between text-xs text-slate-500 mb-1">
+        <span class="uppercase tracking-wide">Velas</span>
+        <span id="last-close" class="font-mono">—</span>
+      </div>
+      <div id="chart-candle" class="w-full h-72 bg-slate-950 rounded border border-slate-800"></div>
+
+      <!-- RSI -->
+      <div class="flex items-center justify-between text-xs text-slate-500 mt-3 mb-1">
+        <span class="uppercase tracking-wide">RSI (14)</span>
+        <span id="last-rsi" class="font-mono">—</span>
+      </div>
+      <div id="chart-rsi" class="w-full h-28 bg-slate-950 rounded border border-slate-800"></div>
+
+      <!-- MACD -->
+      <div class="flex items-center justify-between text-xs text-slate-500 mt-3 mb-1">
+        <span class="uppercase tracking-wide">MACD (12/26/9)</span>
+        <span id="last-macd" class="font-mono">—</span>
+      </div>
+      <div id="chart-macd" class="w-full h-28 bg-slate-950 rounded border border-slate-800"></div>
+
+      <!-- ADX -->
+      <div class="flex items-center justify-between text-xs text-slate-500 mt-3 mb-1">
+        <span class="uppercase tracking-wide">ADX (14)</span>
+        <span id="last-adx" class="font-mono">—</span>
+      </div>
+      <div id="chart-adx" class="w-full h-28 bg-slate-950 rounded border border-slate-800"></div>
+
+      <p id="chart-status" class="mt-3 text-xs text-slate-500">cargando…</p>
     </section>
 
     <!-- Approvals (full width) -->
@@ -325,40 +356,111 @@
     }
   });
 
-  // ── chart ────────────────────────────────────────────────────────────
-  let chart = null;
-  let candleSeries = null;
-  function initChart() {
-    if (chart) return;
-    chart = LightweightCharts.createChart($("chart"), {
-      layout: { background: { color: "#020617" }, textColor: "#94a3b8" },
-      grid: { vertLines: { color: "#1e293b" }, horzLines: { color: "#1e293b" } },
-      crosshair: { mode: 1 },
-      rightPriceScale: { borderColor: "#334155" },
-      timeScale: { borderColor: "#334155", timeVisible: true, secondsVisible: false },
-      autoSize: true,
-    });
-    candleSeries = chart.addCandlestickSeries({
+  // ── chart (multi-pane: candles + RSI + MACD + ADX) ───────────────────
+  const chartTheme = {
+    layout: { background: { color: "#020617" }, textColor: "#94a3b8" },
+    grid: { vertLines: { color: "#1e293b" }, horzLines: { color: "#1e293b" } },
+    crosshair: { mode: 1 },
+    rightPriceScale: { borderColor: "#334155" },
+    timeScale: { borderColor: "#334155", timeVisible: true, secondsVisible: false },
+    autoSize: true,
+  };
+
+  let charts = null;
+  let series = null;
+
+  function initCharts() {
+    if (charts) return;
+    const candle = LightweightCharts.createChart($("chart-candle"), chartTheme);
+    const rsiC   = LightweightCharts.createChart($("chart-rsi"),    chartTheme);
+    const macdC  = LightweightCharts.createChart($("chart-macd"),   chartTheme);
+    const adxC   = LightweightCharts.createChart($("chart-adx"),    chartTheme);
+
+    const candleSeries = candle.addCandlestickSeries({
       upColor: "#34d399", downColor: "#f87171",
       borderUpColor: "#34d399", borderDownColor: "#f87171",
       wickUpColor: "#34d399", wickDownColor: "#f87171",
     });
+
+    const rsiSeries = rsiC.addLineSeries({ color: "#a78bfa", lineWidth: 2 });
+    // Overbought / oversold guide lines.
+    rsiSeries.createPriceLine({ price: 70, color: "#475569", lineStyle: 2, axisLabelVisible: false });
+    rsiSeries.createPriceLine({ price: 30, color: "#475569", lineStyle: 2, axisLabelVisible: false });
+
+    const macdLine   = macdC.addLineSeries({ color: "#60a5fa", lineWidth: 2 });
+    const macdSignal = macdC.addLineSeries({ color: "#fbbf24", lineWidth: 1 });
+    const macdHist   = macdC.addHistogramSeries({ color: "#475569" });
+
+    const adxSeries = adxC.addLineSeries({ color: "#22d3ee", lineWidth: 2 });
+    adxSeries.createPriceLine({ price: 25, color: "#475569", lineStyle: 2, axisLabelVisible: false });
+
+    charts = [candle, rsiC, macdC, adxC];
+    series = { candle: candleSeries, rsi: rsiSeries, macdLine, macdSignal, macdHist, adx: adxSeries };
+
+    // Sync all time scales — one chart's pan/zoom drives the others.
+    let syncing = false;
+    charts.forEach((c) => {
+      c.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+        if (!range || syncing) return;
+        syncing = true;
+        charts.forEach((o) => { if (o !== c) o.timeScale().setVisibleLogicalRange(range); });
+        syncing = false;
+      });
+    });
+  }
+
+  function colorHistRows(rows) {
+    // Green if rising or positive, red if falling or negative — Coinglass-style.
+    return rows.map((r, i) => {
+      const prev = i > 0 ? rows[i - 1].value : 0;
+      const rising = r.value >= prev;
+      const positive = r.value >= 0;
+      const color = positive
+        ? (rising ? "#34d399" : "#10b981")
+        : (rising ? "#f87171" : "#dc2626");
+      return { time: r.time, value: r.value, color };
+    });
   }
 
   async function loadChart() {
-    initChart();
+    initCharts();
     const pair = $("chart-pair").value.trim().toUpperCase();
     const tf = $("chart-tf").value;
     $("chart-status").textContent = `cargando ${pair} ${tf}…`;
     try {
-      const r = await fetch(`${base}/api/klines/${pair}?interval=${tf}&bars=300`, { headers: headers() });
+      const r = await fetch(`${base}/api/indicators/${pair}?interval=${tf}&bars=500`, { headers: headers() });
       if (!r.ok) throw new Error("status " + r.status);
-      const rows = await r.json();
-      // Lightweight Charts wants ascending order by time
-      rows.sort((a, b) => a.time - b.time);
-      candleSeries.setData(rows);
-      $("chart-status").textContent = `${pair} ${tf} · ${rows.length} velas · última: ${
-        fmt(rows[rows.length - 1]?.close)
+      const j = await r.json();
+
+      const candles = (j.candles || []).slice().sort((a, b) => a.time - b.time);
+      series.candle.setData(candles);
+      series.rsi.setData((j.rsi || []).slice().sort((a, b) => a.time - b.time));
+      series.macdLine.setData((j.macd?.line || []).slice().sort((a, b) => a.time - b.time));
+      series.macdSignal.setData((j.macd?.signal || []).slice().sort((a, b) => a.time - b.time));
+      series.macdHist.setData(colorHistRows((j.macd?.hist || []).slice().sort((a, b) => a.time - b.time)));
+      series.adx.setData((j.adx || []).slice().sort((a, b) => a.time - b.time));
+
+      // Update "last value" readouts.
+      const last = (arr) => (arr && arr.length ? arr[arr.length - 1] : null);
+      const lastCandle = last(candles);
+      $("last-close").textContent = lastCandle ? fmt(lastCandle.close) : "—";
+
+      const lastRsi = last(j.rsi);
+      const rsiVal = lastRsi ? Number(lastRsi.value) : null;
+      $("last-rsi").textContent = rsiVal !== null ? rsiVal.toFixed(1) : "—";
+
+      const lastLine = last(j.macd?.line);
+      const lastSig  = last(j.macd?.signal);
+      const lastHist = last(j.macd?.hist);
+      $("last-macd").textContent = lastLine
+        ? `línea ${Number(lastLine.value).toFixed(2)} · señal ${lastSig ? Number(lastSig.value).toFixed(2) : "—"} · hist ${lastHist ? Number(lastHist.value).toFixed(2) : "—"}`
+        : "—";
+
+      const lastAdx = last(j.adx);
+      $("last-adx").textContent = lastAdx ? Number(lastAdx.value).toFixed(1) : "—";
+
+      $("chart-status").textContent = `${pair} ${tf} · ${candles.length} velas · última: ${
+        lastCandle ? fmt(lastCandle.close) : "—"
       }`;
     } catch (e) {
       $("chart-status").textContent = `error: ${e.message}`;

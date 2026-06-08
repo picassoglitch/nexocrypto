@@ -308,6 +308,68 @@ async def proxy_klines(
     ]
 
 
+@router.get("/indicators/{pair}")
+async def proxy_indicators(
+    pair: str,
+    interval: str = Query(default="5m"),
+    bars: int = Query(default=300, ge=60, le=1500),
+    _user_id: UUID = Depends(get_current_user_id),
+) -> dict:
+    """Klines + RSI(14) + MACD(12/26/9) + ADX(14) for the dashboard chart.
+
+    Returns:
+      {
+        "candles": [{time, open, high, low, close}, ...],   # ascending by time
+        "rsi":     [{time, value}, ...],
+        "macd":    {"line": [...], "signal": [...], "hist": [...]},
+        "adx":     [{time, value}, ...],
+      }
+    Series are sparse (entries omitted during the indicator's warmup window).
+    """
+    from nexocrypto_connectors.bitunix import BitunixConnector
+    from nexocrypto_engine.strategy.indicators import adx, macd, rsi
+
+    venue = BitunixConnector()
+    try:
+        klines = await venue.klines(pair, interval, limit=bars)
+    finally:
+        await venue.aclose()
+
+    times = [int(k.open_time.timestamp()) for k in klines]
+    candles = [
+        {
+            "time": times[i],
+            "open": float(klines[i].open),
+            "high": float(klines[i].high),
+            "low": float(klines[i].low),
+            "close": float(klines[i].close),
+        }
+        for i in range(len(klines))
+    ]
+
+    rsi_vals = rsi(klines, period=14)
+    adx_vals = adx(klines, period=14)
+    macd_line, macd_signal, macd_hist = macd(klines, fast=12, slow=26, signal=9)
+
+    def _sparse(values: list) -> list[dict]:
+        return [
+            {"time": times[i], "value": float(v)}
+            for i, v in enumerate(values)
+            if v is not None
+        ]
+
+    return {
+        "candles": candles,
+        "rsi": _sparse(rsi_vals),
+        "macd": {
+            "line": _sparse(macd_line),
+            "signal": _sparse(macd_signal),
+            "hist": _sparse(macd_hist),
+        },
+        "adx": _sparse(adx_vals),
+    }
+
+
 @router.get("/stream")
 async def stream(
     _user_id: UUID = Depends(get_current_user_id),

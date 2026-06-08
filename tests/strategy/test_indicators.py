@@ -6,6 +6,7 @@ from nexocrypto_engine.strategy.indicators import (
     adx,
     atr,
     ema,
+    macd,
     rsi,
     true_range,
     vwap,
@@ -77,6 +78,53 @@ def test_adx_higher_on_trend_than_flat():
     last_trend = [v for v in a_trend if v is not None][-1]
     last_flat = [v for v in a_flat if v is not None][-1] if any(v is not None for v in a_flat) else Decimal("0")
     assert last_trend > last_flat
+
+
+def test_macd_constant_series_is_zero_after_warmup():
+    """No trend → fast EMA == slow EMA → MACD line is 0, signal is 0, hist is 0."""
+    series = flat_series(60, price=100)
+    line, sig, hist = macd(series, fast=12, slow=26, signal=9)
+    # First non-None values appear at index slow-1 for line, slow-1+signal-1 for signal.
+    assert line[25] == Decimal(0)
+    assert sig[33] == Decimal(0)
+    assert hist[33] == Decimal(0)
+
+
+def test_macd_uptrend_line_positive_and_hist_nonnegative():
+    """Rising series: fast EMA tracks closer to price than slow → MACD line > 0.
+    On a smooth uptrend the histogram never goes negative. (On a perfectly linear
+    trend the line stabilises and signal converges to it; on any acceleration the
+    line leads and hist > 0.)"""
+    series = linear_trend(80, start_price=100, step=1.0)
+    line, sig, hist = macd(series, fast=12, slow=26, signal=9)
+    last_line = [v for v in line if v is not None][-1]
+    # MACD line stabilises near step * (slow - fast)/2 = 7.0 in a constant-step trend.
+    assert last_line > Decimal(6) and last_line < Decimal(8)
+    # Histogram never goes negative on a pure uptrend.
+    assert all(v >= Decimal(0) for v in hist if v is not None)
+
+
+def test_macd_warmup_lengths_match_definition():
+    series = linear_trend(60, start_price=100, step=1.0)
+    line, sig, hist = macd(series, fast=12, slow=26, signal=9)
+    # MACD line needs `slow` warmup → index 0..24 None, 25 first value.
+    assert all(v is None for v in line[:25])
+    assert line[25] is not None
+    # Signal needs `slow + signal - 1` warmup → index 0..32 None, 33 first value.
+    assert all(v is None for v in sig[:33])
+    assert sig[33] is not None
+    # Hist mirrors signal alignment.
+    assert all(v is None for v in hist[:33])
+    assert hist[33] is not None
+
+
+def test_macd_rejects_fast_ge_slow():
+    series = flat_series(30, price=100)
+    try:
+        macd(series, fast=26, slow=12, signal=9)
+    except ValueError:
+        return
+    raise AssertionError("expected ValueError for fast >= slow")
 
 
 def test_vwap_aggregates_typical_price_by_volume():

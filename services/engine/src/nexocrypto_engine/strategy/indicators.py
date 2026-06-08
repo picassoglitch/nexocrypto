@@ -164,6 +164,50 @@ def adx(klines: list[Kline], period: int = 14) -> list[Decimal | None]:
     return out
 
 
+def macd(
+    klines: list[Kline],
+    fast: int = 12,
+    slow: int = 26,
+    signal: int = 9,
+) -> tuple[list[Decimal | None], list[Decimal | None], list[Decimal | None]]:
+    """Standard MACD: (macd_line, signal_line, histogram) all aligned to klines.
+
+    macd_line   = EMA(close, fast) - EMA(close, slow)
+    signal_line = EMA(macd_line, signal)   # computed on the non-None tail
+    histogram   = macd_line - signal_line
+    """
+    if fast <= 0 or slow <= 0 or signal <= 0:
+        raise ValueError("periods must be positive")
+    if fast >= slow:
+        raise ValueError("fast period must be less than slow")
+    n = len(klines)
+    ema_fast = ema(klines, fast)
+    ema_slow = ema(klines, slow)
+    macd_line: list[Decimal | None] = [
+        (f - s) if (f is not None and s is not None) else None
+        for f, s in zip(ema_fast, ema_slow)
+    ]
+
+    first = next((i for i, v in enumerate(macd_line) if v is not None), None)
+    signal_line: list[Decimal | None] = [None] * n
+    if first is not None and (n - first) >= signal:
+        alpha = Decimal(2) / Decimal(signal + 1)
+        tail = macd_line[first:]
+        seed = sum(tail[:signal], start=Decimal(0)) / Decimal(signal)
+        signal_line[first + signal - 1] = seed
+        prev = seed
+        for j, v in enumerate(tail[signal:], start=first + signal):
+            cur = alpha * v + (Decimal(1) - alpha) * prev
+            signal_line[j] = cur
+            prev = cur
+
+    hist: list[Decimal | None] = [
+        (m - s) if (m is not None and s is not None) else None
+        for m, s in zip(macd_line, signal_line)
+    ]
+    return macd_line, signal_line, hist
+
+
 def vwap(klines: list[Kline]) -> list[Decimal | None]:
     """Cumulative VWAP from the start of the series. (Per-session VWAP is a wrapper.)"""
     out: list[Decimal | None] = []
