@@ -71,6 +71,24 @@ async def post_approval_decision(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"unknown action {body.action!r}; allowed: {sorted(_ALLOWED_APPROVAL_ACTIONS)}",
         )
+
+    # "approve" runs the execution coordinator: it resolves the approval and, when the
+    # mode/paper-gate/connection conditions are all met, places the live order via the
+    # deterministic ExecutionEngine (CLAUDE.md rules 3, 5, 8, 9). Every other action is a
+    # plain state change.
+    if body.action == "approve":
+        approval = await store.get_approval(user_id=user_id, approval_id=approval_id)
+        if approval is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="approval not found")
+        if approval.get("status") not in (None, "pending"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"approval already {approval.get('status')}",
+            )
+        from .execution_coordinator import handle_approval_approve
+
+        return await handle_approval_approve(store=store, user_id=user_id, approval=approval)
+
     result = await store.resolve_approval(
         user_id=user_id, approval_id=approval_id, action=body.action, reason=body.reason
     )
@@ -306,6 +324,82 @@ async def proxy_klines(
         }
         for k in rows
     ]
+
+
+# Venue capabilities — where bots may run. Mirrors CLAUDE.md:
+#   Bitunix = primary live futures venue (built first); LBank = second live venue;
+#   Binance = data-only (free historical klines for backtests, NEVER live trading).
+_VENUES: list[dict[str, Any]] = [
+    {
+        "id": "bitunix",
+        "name": "Bitunix",
+        "live": True,
+        "data_only": False,
+        "note": "Venue de fill nativo · order book en vivo · ejecución",
+    },
+    {
+        "id": "lbank",
+        "name": "LBank",
+        "live": True,
+        "data_only": False,
+        "note": "Segundo venue de fill (en construcción)",
+    },
+    {
+        "id": "binance",
+        "name": "Binance",
+        "live": False,
+        "data_only": True,
+        "note": "Solo datos · klines históricos para backtests · sin trading en vivo",
+    },
+]
+
+
+@router.get("/markets")
+async def list_markets(
+    venue: str = Query(default="bitunix"),
+    _user_id: UUID = Depends(get_current_user_id),
+) -> dict:
+    """Available venues (where bots can run) + the tradeable futures symbols for one.
+
+    `venues` lists every connector and whether it supports live trading or is
+    data-only (CLAUDE.md: Binance is data-only). `symbols` is the live contract
+    list for the requested `venue`. Only Bitunix exposes a public contract list
+    today; other venues return an empty symbol list with their capabilities still
+    described so the UI can show where bots may eventually run.
+    """
+    venue = venue.strip().lower()
+    if venue not in _VALID_EXCHANGES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"unknown venue {venue!r}; allowed: {sorted(_VALID_EXCHANGES)}",
+        )
+
+    symbols: list[dict] = []
+    error: str | None = None
+    if venue == "bitunix":
+        from nexocrypto_connectors.bitunix import BitunixConnector
+
+        conn = BitunixConnector()
+        try:
+            pairs = await conn.trading_pairs()
+        except Exception as e:  # surface, never crash the dashboard
+            error = str(e)
+            pairs = []
+        finally:
+            await conn.aclose()
+        # Only OPEN, API-routable contracts can host a live bot. Sort majors first.
+        _MAJORS = {"BTC": 0, "ETH": 1, "SOL": 2, "BNB": 3, "XRP": 4}
+        usable = [p for p in pairs if p["status"] == "OPEN" and p["api_supported"]]
+        usable.sort(key=lambda p: (_MAJORS.get(p["base"], 99), p["symbol"]))
+        symbols = usable
+
+    return {
+        "venues": _VENUES,
+        "active_venue": venue,
+        "symbols": symbols,
+        "count": len(symbols),
+        "error": error,
+    }
 
 
 @router.get("/indicators/{pair}")

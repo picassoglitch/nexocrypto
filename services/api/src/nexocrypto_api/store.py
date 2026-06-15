@@ -28,11 +28,19 @@ class ApiStore(Protocol):
     # ── approvals (semi-auto queue) ───────────────────────
     async def list_approvals(self, *, user_id: UUID) -> list[dict]: ...
     async def add_approval(self, *, user_id: UUID, signal: Signal, decision: TradeDecision) -> dict: ...
+    async def get_approval(self, *, user_id: UUID, approval_id: UUID) -> dict | None: ...
     async def resolve_approval(self, *, user_id: UUID, approval_id: UUID, action: str, reason: str | None = None) -> dict | None: ...
 
     # ── execution ─────────────────────────────────────────
     async def list_positions(self, *, user_id: UUID) -> list[dict]: ...
     async def list_trades(self, *, user_id: UUID) -> list[dict]: ...
+    async def add_order(self, *, user_id: UUID, order: dict) -> dict: ...
+    async def add_trade(self, *, user_id: UUID, trade: dict) -> dict: ...
+    async def add_audit_log(self, *, user_id: UUID, actor: str, action: str, reason: str, details: dict | None = None) -> dict: ...
+    async def list_audit_logs(self, *, user_id: UUID) -> list[dict]: ...
+    # Internal: returns the ENCRYPTED key blobs for one venue so the caller can decrypt
+    # them just-in-time. Never exposed over the API (CLAUDE.md rule 7).
+    async def get_exchange_connection_enc(self, *, user_id: UUID, exchange: str) -> dict | None: ...
 
     # ── mode + risk ───────────────────────────────────────
     async def get_mode(self, *, user_id: UUID) -> dict: ...
@@ -79,6 +87,8 @@ class InMemoryStore:
         self._approvals: list[dict] = []
         self._positions: dict[UUID, list[dict]] = {}
         self._trades: dict[UUID, list[dict]] = {}
+        self._orders: dict[UUID, list[dict]] = {}
+        self._audit: dict[UUID, list[dict]] = {}
         self._mode: dict[UUID, dict] = {}
         self._risk_profiles: dict[UUID, RiskProfile] = {}
         self._fee_schedules: list[FeeSchedule] = []
@@ -149,6 +159,12 @@ class InMemoryStore:
         self._approvals.append(record)
         return record
 
+    async def get_approval(self, *, user_id: UUID, approval_id: UUID) -> dict | None:
+        for a in self._approvals:
+            if a["id"] == approval_id and a["user_id"] == user_id:
+                return a
+        return None
+
     async def resolve_approval(self, *, user_id: UUID, approval_id: UUID, action: str, reason: str | None = None) -> dict | None:
         for a in self._approvals:
             if a["id"] == approval_id and a["user_id"] == user_id:
@@ -163,6 +179,39 @@ class InMemoryStore:
 
     async def list_trades(self, *, user_id: UUID) -> list[dict]:
         return list(self._trades.get(user_id, []))
+
+    async def add_order(self, *, user_id: UUID, order: dict) -> dict:
+        record = {"id": uuid4(), "user_id": user_id, **order}
+        self._orders.setdefault(user_id, []).append(record)
+        return record
+
+    async def add_trade(self, *, user_id: UUID, trade: dict) -> dict:
+        record = {"id": uuid4(), "user_id": user_id, **trade}
+        self._trades.setdefault(user_id, []).append(record)
+        return record
+
+    async def add_audit_log(
+        self, *, user_id: UUID, actor: str, action: str, reason: str, details: dict | None = None
+    ) -> dict:
+        record = {
+            "id": uuid4(),
+            "user_id": user_id,
+            "actor": actor,
+            "action": action,
+            "reason": reason,
+            "details": details or {},
+        }
+        self._audit.setdefault(user_id, []).append(record)
+        return record
+
+    async def list_audit_logs(self, *, user_id: UUID) -> list[dict]:
+        return list(self._audit.get(user_id, []))
+
+    async def get_exchange_connection_enc(self, *, user_id: UUID, exchange: str) -> dict | None:
+        for c in self._connections:
+            if c["user_id"] == user_id and c["exchange"] == exchange:
+                return c  # includes api_key_enc / api_secret_enc — internal use only
+        return None
 
     async def get_mode(self, *, user_id: UUID) -> dict:
         return self._mode.get(user_id, {

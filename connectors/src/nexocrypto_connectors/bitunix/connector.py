@@ -191,6 +191,29 @@ class BitunixConnector(ExchangeConnector):
             is_native=True,
         )
 
+    async def trading_pairs(self) -> list[dict[str, Any]]:
+        """Public list of futures contracts available on Bitunix.
+
+        Returns one dict per symbol with the fields the dashboard needs to build a
+        market picker: symbol, base, quote, max leverage, and trading status.
+        Data-only — no keys required. Callers decide which to surface (e.g. only
+        symbolStatus == "OPEN" and isApiSupported for live order routing).
+        """
+        data = await self._get_public("/api/v1/futures/market/trading_pairs")
+        out: list[dict[str, Any]] = []
+        for row in data or []:
+            out.append(
+                {
+                    "symbol": row["symbol"],
+                    "base": row.get("base", ""),
+                    "quote": row.get("quote", ""),
+                    "max_leverage": int(row.get("maxLeverage", 0) or 0),
+                    "status": str(row.get("symbolStatus", "")).upper(),
+                    "api_supported": bool(row.get("isApiSupported", False)),
+                }
+            )
+        return out
+
     async def funding(self, pair: str) -> FundingInfo:
         data = await self._get_public("/api/v1/futures/market/funding_rate", {"symbol": pair})
         if not data:

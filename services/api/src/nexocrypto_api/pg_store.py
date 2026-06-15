@@ -249,6 +249,24 @@ class PgStore:
         finally:
             await conn.close()
 
+    async def get_approval(self, *, user_id: UUID, approval_id: UUID) -> dict | None:
+        conn = await self._conn()
+        try:
+            await self._ensure_user(conn, user_id)
+            cur = await conn.execute(
+                """
+                select id, user_id, signal_id, pair, side, entry, stop_loss, take_profits,
+                       leverage, qty, ev_net_bps, idempotency_key, status, created_at
+                  from nexocrypto.approvals
+                 where id = %s and user_id = %s
+                """,
+                (approval_id, user_id),
+            )
+            row = await cur.fetchone()
+            return self._json_safe(row) if row else None
+        finally:
+            await conn.close()
+
     async def resolve_approval(
         self, *, user_id: UUID, approval_id: UUID, action: str, reason: str | None = None
     ) -> dict | None:
@@ -304,6 +322,143 @@ class PgStore:
                 (user_id,),
             )
             return [self._json_safe(r) for r in await cur.fetchall()]
+        finally:
+            await conn.close()
+
+    async def add_order(self, *, user_id: UUID, order: dict) -> dict:
+        """Insert an order row (the venue write record). Idempotent on idempotency_key:
+        a UNIQUE constraint means a replay returns the existing row, never a duplicate
+        order (CLAUDE.md rule 8)."""
+        conn = await self._conn()
+        try:
+            await self._ensure_user(conn, user_id)
+            try:
+                cur = await conn.execute(
+                    """
+                    insert into nexocrypto.orders
+                      (user_id, trade_id, exchange_order_id, type, side, price, qty,
+                       reduce_only, status, idempotency_key)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    returning id, user_id, trade_id, exchange_order_id, type, side, price,
+                              qty, reduce_only, status, idempotency_key, created_at
+                    """,
+                    (
+                        user_id,
+                        order.get("trade_id"),
+                        order.get("exchange_order_id"),
+                        order.get("type"),
+                        order.get("side"),
+                        order.get("price"),
+                        order.get("qty"),
+                        order.get("reduce_only", False),
+                        order.get("status"),
+                        order.get("idempotency_key"),
+                    ),
+                )
+                row = await cur.fetchone()
+            except psycopg.errors.UniqueViolation:
+                cur = await conn.execute(
+                    "select id, user_id, trade_id, exchange_order_id, type, side, price, "
+                    "qty, reduce_only, status, idempotency_key, created_at "
+                    "from nexocrypto.orders where idempotency_key = %s",
+                    (order.get("idempotency_key"),),
+                )
+                row = await cur.fetchone()
+            return self._json_safe(row)
+        finally:
+            await conn.close()
+
+    async def add_trade(self, *, user_id: UUID, trade: dict) -> dict:
+        conn = await self._conn()
+        try:
+            await self._ensure_user(conn, user_id)
+            cur = await conn.execute(
+                """
+                insert into nexocrypto.trades
+                  (user_id, exchange, pair, side, strategy, mode, entry_price, qty,
+                   leverage, status)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                returning id, user_id, exchange, pair, side, strategy, mode, entry_price,
+                          exit_price, qty, leverage, status, opened_at, closed_at
+                """,
+                (
+                    user_id,
+                    trade.get("exchange"),
+                    trade.get("pair"),
+                    trade.get("side"),
+                    trade.get("strategy"),
+                    trade.get("mode"),
+                    trade.get("entry_price"),
+                    trade.get("qty"),
+                    trade.get("leverage"),
+                    trade.get("status"),
+                ),
+            )
+            return self._json_safe(await cur.fetchone())
+        finally:
+            await conn.close()
+
+    async def add_audit_log(
+        self, *, user_id: UUID, actor: str, action: str, reason: str, details: dict | None = None
+    ) -> dict:
+        conn = await self._conn()
+        try:
+            await self._ensure_user(conn, user_id)
+            cur = await conn.execute(
+                """
+                insert into nexocrypto.audit_logs (user_id, actor, action, reason, details)
+                values (%s, %s, %s, %s, %s)
+                returning id, user_id, actor, action, reason, details, created_at
+                """,
+                (user_id, actor, action, reason, json.dumps(details or {})),
+            )
+            return self._json_safe(await cur.fetchone())
+        finally:
+            await conn.close()
+
+    async def list_audit_logs(self, *, user_id: UUID) -> list[dict]:
+        conn = await self._conn()
+        try:
+            await self._ensure_user(conn, user_id)
+            cur = await conn.execute(
+                "select id, user_id, actor, action, reason, details, created_at "
+                "from nexocrypto.audit_logs where user_id = %s order by created_at desc",
+                (user_id,),
+            )
+            return [self._json_safe(r) for r in await cur.fetchall()]
+        finally:
+            await conn.close()
+
+    async def get_exchange_connection_enc(self, *, user_id: UUID, exchange: str) -> dict | None:
+        """Return the ENCRYPTED key blobs for one venue (internal use only — the caller
+        decrypts just-in-time and never returns these over the API). CLAUDE.md rule 7."""
+        conn = await self._conn()
+        try:
+            await self._ensure_user(conn, user_id)
+            cur = await conn.execute(
+                """
+                select id, user_id, exchange, api_key_enc, api_secret_enc, ip_allowlist,
+                       status
+                  from nexocrypto.exchange_connections
+                 where user_id = %s and exchange = %s
+                 order by created_at desc
+                 limit 1
+                """,
+                (user_id, exchange),
+            )
+            row = await cur.fetchone()
+            if row is None:
+                return None
+            # Keep the bytea blobs as raw bytes; do NOT run them through _json_safe.
+            return {
+                "id": row["id"],
+                "user_id": row["user_id"],
+                "exchange": row["exchange"],
+                "api_key_enc": bytes(row["api_key_enc"]) if row["api_key_enc"] is not None else None,
+                "api_secret_enc": bytes(row["api_secret_enc"]) if row["api_secret_enc"] is not None else None,
+                "ip_allowlist": row["ip_allowlist"],
+                "status": row["status"],
+            }
         finally:
             await conn.close()
 

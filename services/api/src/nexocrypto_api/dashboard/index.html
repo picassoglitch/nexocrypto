@@ -39,6 +39,51 @@
   </header>
 
   <main class="max-w-7xl mx-auto px-6 py-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+    <!-- Market selector (full width) — single source of truth for symbol + venue -->
+    <section class="md:col-span-3 bg-slate-900 rounded-xl border border-slate-800 p-5">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wide">Mercado</h2>
+        <span class="text-xs text-slate-500">elige venue + moneda · alimenta gráfico, libro, contexto y noticias</span>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+        <!-- Venue -->
+        <div>
+          <label class="block text-xs text-slate-500 uppercase tracking-wide mb-1">Venue (dónde corren los bots)</label>
+          <select id="market-venue" class="w-full bg-slate-950 border border-slate-800 rounded px-2 py-2 text-sm"></select>
+          <p id="venue-note" class="mt-1 text-[10px] text-slate-500">—</p>
+        </div>
+
+        <!-- Symbol -->
+        <div class="md:col-span-2">
+          <label class="block text-xs text-slate-500 uppercase tracking-wide mb-1">
+            Moneda / contrato (futuros)
+            <span id="market-count" class="text-slate-600 normal-case">—</span>
+          </label>
+          <div class="flex gap-2">
+            <input id="market-search" placeholder="busca BTC, SOL, PEPE…"
+                   class="flex-1 bg-slate-950 border border-slate-800 rounded px-2 py-2 text-sm uppercase font-mono" />
+            <select id="market-symbol" class="w-44 bg-slate-950 border border-slate-800 rounded px-2 py-2 text-sm font-mono"></select>
+          </div>
+          <p id="symbol-note" class="mt-1 text-[10px] text-slate-500">—</p>
+        </div>
+
+        <!-- Active readout -->
+        <div class="bg-slate-950 border border-slate-800 rounded p-3">
+          <p class="text-[10px] text-slate-500 uppercase tracking-wide">Activo</p>
+          <p id="market-active" class="text-lg font-mono font-semibold text-emerald-400">—</p>
+          <p id="market-active-venue" class="text-[10px] text-slate-500">—</p>
+        </div>
+      </div>
+
+      <!-- Quick-pick majors -->
+      <div class="mt-3 flex items-center gap-2 flex-wrap">
+        <span class="text-[10px] text-slate-600 uppercase tracking-wide">Rápido:</span>
+        <div id="market-quick" class="flex gap-1 flex-wrap"></div>
+      </div>
+      <p id="market-status" class="mt-2 text-xs text-slate-500">cargando mercados…</p>
+    </section>
+
     <!-- Mode card -->
     <section class="bg-slate-900 rounded-xl border border-slate-800 p-5">
       <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-3">Modo</h2>
@@ -101,9 +146,11 @@
     <!-- Chart (full width) — multi-pane: candles + RSI + MACD + ADX -->
     <section class="md:col-span-3 bg-slate-900 rounded-xl border border-slate-800 p-5">
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wide">Gráfico — Bitunix nativo</h2>
+        <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wide">
+          Gráfico — Bitunix nativo
+          <span id="chart-pair-label" class="ml-2 text-xs text-emerald-400 font-mono normal-case">BTCUSDT</span>
+        </h2>
         <div class="flex items-center gap-2 text-xs">
-          <input id="chart-pair" value="BTCUSDT" class="bg-slate-950 border border-slate-800 rounded px-2 py-1 w-24 font-mono uppercase" />
           <select id="chart-tf" class="bg-slate-950 border border-slate-800 rounded px-2 py-1">
             <option value="1m">1m</option>
             <option value="5m" selected>5m</option>
@@ -275,13 +322,47 @@
       <div id="approvals-body" class="text-sm">
         <p class="text-slate-500 italic">sin aprobaciones pendientes — el motor está en modo papel</p>
       </div>
+      <div id="exec-banner" class="hidden"></div>
+      <p class="mt-3 text-xs text-slate-500">
+        Aprobar coloca una orden real en Bitunix <b>solo</b> en modo <code class="text-amber-400">semi_auto</code>
+        con el gate de papel abierto y llaves cargadas. En modo papel solo se registra (CLAUDE.md reglas 3 y 5).
+      </p>
+    </section>
+
+    <!-- Executed trades (full width) -->
+    <section class="md:col-span-3 bg-slate-900 rounded-xl border border-slate-800 p-5">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wide">Operaciones ejecutadas</h2>
+        <span class="text-xs text-slate-500">órdenes enviadas al venue · cada fila tiene su audit log</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="text-xs text-slate-500 uppercase">
+            <tr>
+              <th class="text-left py-2 pr-3">Abierta</th>
+              <th class="text-left py-2 pr-3">Venue</th>
+              <th class="text-left py-2 pr-3">Par</th>
+              <th class="text-left py-2 pr-3">Lado</th>
+              <th class="text-left py-2 pr-3">Modo</th>
+              <th class="text-right py-2 pr-3">Entrada</th>
+              <th class="text-right py-2 pr-3">Cant.</th>
+              <th class="text-right py-2 pr-3">Apal.</th>
+              <th class="text-left py-2 pr-3">Estado</th>
+            </tr>
+          </thead>
+          <tbody id="trades-body">
+            <tr><td colspan="9" class="py-6 text-center text-slate-500 italic">sin operaciones ejecutadas todavía</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p id="trades-status" class="mt-3 text-xs text-slate-500">—</p>
     </section>
 
     <!-- News feed (full width) -->
     <section class="md:col-span-3 bg-slate-900 rounded-xl border border-slate-800 p-5">
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
         <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wide">
-          Noticias · BTC
+          Noticias · <span id="news-coin" class="text-emerald-400">BTC</span>
         </h2>
         <span class="text-xs text-slate-500">contexto, no señal · CryptoPanic</span>
       </div>
@@ -348,6 +429,103 @@
 
   function headers() {
     return { "X-User-Id": $("user-id").value.trim() };
+  }
+
+  // ── Market state (single source of truth: venue + symbol) ────────────
+  const market = {
+    venue: "bitunix",
+    symbol: "BTCUSDT",
+    base: "BTC",
+    symbols: [],   // [{symbol, base, quote, max_leverage, status}]
+    venues: [],    // [{id, name, live, data_only, note}]
+  };
+  const QUICK = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT"];
+
+  function currentSymbol() { return market.symbol; }
+  function currentBase() { return market.base || market.symbol.replace(/USDT$/, ""); }
+
+  function applySymbol(sym) {
+    if (!sym) return;
+    market.symbol = sym.toUpperCase();
+    const meta = market.symbols.find(s => s.symbol === market.symbol);
+    market.base = meta ? meta.base : market.symbol.replace(/USDT$/, "");
+    // Reflect everywhere the symbol is shown.
+    $("market-active").textContent = market.symbol;
+    $("chart-pair-label").textContent = market.symbol;
+    $("bt-pair").value = market.symbol;
+    if ($("market-symbol").value !== market.symbol) $("market-symbol").value = market.symbol;
+    $("symbol-note").textContent = meta
+      ? `${meta.base}/${meta.quote} · apalancamiento máx ${meta.max_leverage}× · ${meta.status}`
+      : "símbolo manual — verifica que exista en el venue";
+    onSymbolChange();
+  }
+
+  function onSymbolChange() {
+    loadChart(); loadOrderbook(); loadCoinglass(); loadNews();
+  }
+
+  function renderSymbolOptions(filter) {
+    const f = (filter || "").trim().toUpperCase();
+    const list = f
+      ? market.symbols.filter(s => s.symbol.includes(f) || s.base.includes(f))
+      : market.symbols;
+    const sel = $("market-symbol");
+    sel.innerHTML = list.slice(0, 400)
+      .map(s => `<option value="${s.symbol}">${s.symbol}</option>`).join("");
+    // Keep the active symbol selected if still present.
+    if (list.some(s => s.symbol === market.symbol)) sel.value = market.symbol;
+    $("market-count").textContent = `(${list.length}${f ? " filtrados" : ""})`;
+  }
+
+  function renderQuickPicks() {
+    const avail = new Set(market.symbols.map(s => s.symbol));
+    $("market-quick").innerHTML = QUICK
+      .filter(q => avail.size === 0 || avail.has(q))
+      .map(q => `<button data-sym="${q}"
+        class="px-2 py-0.5 rounded text-xs font-mono border border-slate-700 hover:bg-slate-800 ${q === market.symbol ? "bg-emerald-900/40 text-emerald-300 border-emerald-700" : "text-slate-300"}">${q}</button>`)
+      .join("");
+    $("market-quick").querySelectorAll("button").forEach(b =>
+      b.addEventListener("click", () => applySymbol(b.dataset.sym)));
+  }
+
+  function renderVenues() {
+    const sel = $("market-venue");
+    sel.innerHTML = market.venues.map(v => {
+      const tag = v.data_only ? " · solo datos" : (v.live ? " · en vivo" : "");
+      return `<option value="${v.id}">${v.name}${tag}</option>`;
+    }).join("");
+    sel.value = market.venue;
+    const v = market.venues.find(x => x.id === market.venue);
+    $("venue-note").textContent = v ? v.note : "—";
+    $("market-active-venue").textContent = v ? v.name : market.venue;
+  }
+
+  async function loadMarkets() {
+    $("market-status").textContent = "cargando mercados…";
+    try {
+      const r = await fetch(`${base}/api/markets?venue=${encodeURIComponent(market.venue)}`, { headers: headers() });
+      if (!r.ok) throw new Error("status " + r.status);
+      const j = await r.json();
+      market.venues = j.venues || [];
+      market.symbols = j.symbols || [];
+      renderVenues();
+      renderQuickPicks();
+      renderSymbolOptions($("market-search").value);
+      // If the active symbol vanished for this venue, fall back to first available.
+      if (market.symbols.length && !market.symbols.some(s => s.symbol === market.symbol)) {
+        applySymbol(market.symbols[0].symbol);
+      } else {
+        applySymbol(market.symbol);
+      }
+      const errNote = j.error ? ` · aviso: ${j.error}` : "";
+      $("market-status").textContent = market.symbols.length
+        ? `${market.symbols.length} contratos en ${market.venue}${errNote}`
+        : `sin lista de contratos para ${market.venue} (escribe el símbolo a mano)${errNote}`;
+    } catch (e) {
+      $("market-status").textContent = `error al cargar mercados: ${e.message} — usando entrada manual`;
+      // Still let the user operate with a manual symbol.
+      renderQuickPicks();
+    }
   }
 
   function setConn(state, label) {
@@ -558,7 +736,7 @@
 
   async function loadChart() {
     initCharts();
-    const pair = $("chart-pair").value.trim().toUpperCase();
+    const pair = currentSymbol();
     const tf = $("chart-tf").value;
     $("chart-status").textContent = `cargando ${pair} ${tf}…`;
     try {
@@ -618,8 +796,23 @@
   }
 
   $("chart-refresh").addEventListener("click", loadChart);
-  $("chart-pair").addEventListener("change", () => { loadChart(); loadCoinglass(); });
   $("chart-tf").addEventListener("change", loadChart);
+
+  // ── Market selector wiring ───────────────────────────────────────────
+  $("market-venue").addEventListener("change", () => {
+    market.venue = $("market-venue").value;
+    loadMarkets();   // re-fetch symbols for the new venue, then re-apply
+  });
+  $("market-symbol").addEventListener("change", () => applySymbol($("market-symbol").value));
+  $("market-search").addEventListener("input", () => renderSymbolOptions($("market-search").value));
+  // Enter in the search box selects the symbol typed verbatim (manual override).
+  $("market-search").addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      const typed = $("market-search").value.trim().toUpperCase();
+      if (typed) applySymbol(typed);
+    }
+  });
 
   // ── Coinglass context panel ──────────────────────────────────────────
   const cgMiniTheme = {
@@ -675,7 +868,7 @@
   }
 
   async function loadCoinglass() {
-    const pair = $("chart-pair").value.trim().toUpperCase();
+    const pair = currentSymbol();
     $("cg-status").textContent = `cargando ${pair}…`;
     try {
       const r = await fetch(`${base}/api/coinglass/${pair}?interval=1h`, { headers: headers() });
@@ -774,6 +967,41 @@
     }
   }
 
+  // ── executed trades ──────────────────────────────────────────────────
+  async function loadTrades() {
+    try {
+      const r = await fetch(base + "/api/trades", { headers: headers() });
+      if (!r.ok) throw new Error("status " + r.status);
+      const rows = await r.json();
+      const body = $("trades-body");
+      if (!rows.length) {
+        body.innerHTML = `<tr><td colspan="9" class="py-6 text-center text-slate-500 italic">sin operaciones ejecutadas todavía</td></tr>`;
+        $("trades-status").textContent = "—";
+        return;
+      }
+      const statusCls = (s) => ({
+        open:   "bg-emerald-900/40 text-emerald-300",
+        closed: "bg-slate-800 text-slate-300",
+      }[s] || "bg-slate-800 text-slate-400");
+      body.innerHTML = rows.map(t => `
+        <tr class="row-enter border-t border-slate-800/60 hover:bg-slate-800/40">
+          <td class="py-2 pr-3 text-slate-400 text-xs">${fmtTime(t.opened_at)}</td>
+          <td class="py-2 pr-3 text-slate-300">${t.exchange || "—"}</td>
+          <td class="py-2 pr-3 font-mono">${t.pair || "—"}</td>
+          <td class="py-2 pr-3">${sideBadge(t.side)}</td>
+          <td class="py-2 pr-3 text-xs"><code class="text-amber-400">${t.mode || "—"}</code></td>
+          <td class="py-2 pr-3 text-right font-mono">${fmt(t.entry_price)}</td>
+          <td class="py-2 pr-3 text-right font-mono">${fmt(t.qty)}</td>
+          <td class="py-2 pr-3 text-right font-mono">${t.leverage ? fmt(t.leverage) + "×" : "—"}</td>
+          <td class="py-2 pr-3"><span class="text-xs px-2 py-0.5 rounded-full ${statusCls(t.status)}">${t.status || "—"}</span></td>
+        </tr>
+      `).join("");
+      $("trades-status").textContent = `${rows.length} operación(es) · actualizado ${new Date().toLocaleTimeString("es-MX")}`;
+    } catch (e) {
+      $("trades-status").textContent = `error: ${e.message}`;
+    }
+  }
+
   // ── approvals ────────────────────────────────────────────────────────
   async function loadApprovals() {
     try {
@@ -832,16 +1060,41 @@
         body: JSON.stringify({ action }),
       });
       if (!r.ok) throw new Error("status " + r.status);
-      await loadApprovals();
-      await loadSignals();
+      const j = await r.json().catch(() => ({}));
+      // Surface what execution actually did. The approve path returns either a resolved
+      // approval (no live order) or an execution result (placed / blocked / failed).
+      if (action === "approve") {
+        if (j.executed === true) {
+          showExecBanner("ok", `Orden enviada a Bitunix · ${j.pair} ${j.side} ${j.qty} · id ${j.exchange_order_id}`);
+        } else if (j.executed === false) {
+          showExecBanner("warn", `No ejecutada (${j.status}): ${j.reason}`);
+        } else {
+          showExecBanner("info", "Aprobación registrada (sin orden en vivo — modo papel / gate cerrado).");
+        }
+      }
+      await Promise.all([loadApprovals(), loadSignals(), loadTrades()]);
     } catch (e) {
-      alert("error: " + e.message);
+      showExecBanner("err", "error: " + e.message);
     }
+  }
+
+  function showExecBanner(kind, msg) {
+    const el = $("exec-banner");
+    if (!el) return;
+    const cls = {
+      ok:   "bg-emerald-950/40 border-emerald-800/50 text-emerald-200",
+      warn: "bg-amber-950/40 border-amber-800/50 text-amber-200",
+      info: "bg-slate-800/60 border-slate-700 text-slate-300",
+      err:  "bg-rose-950/40 border-rose-800/50 text-rose-200",
+    }[kind] || "bg-slate-800/60 border-slate-700 text-slate-300";
+    el.className = `mt-3 text-xs rounded border px-3 py-2 ${cls}`;
+    el.textContent = msg;
+    el.classList.remove("hidden");
   }
 
   // ── Order book ladder (polling) ──────────────────────────────────────
   async function loadOrderbook() {
-    const pair = $("chart-pair").value.trim().toUpperCase();
+    const pair = currentSymbol();
     try {
       const r = await fetch(`${base}/api/orderbook/${pair}?limit=50`, { headers: headers() });
       if (!r.ok) throw new Error("status " + r.status);
@@ -891,8 +1144,10 @@
   }
 
   async function loadNews() {
+    const coin = currentBase();
+    $("news-coin").textContent = coin;
     try {
-      const r = await fetch(`${base}/api/news?currencies=BTC&limit=25`, { headers: headers() });
+      const r = await fetch(`${base}/api/news?currencies=${encodeURIComponent(coin)}&limit=25`, { headers: headers() });
       if (r.status === 503) {
         const j = await r.json().catch(() => ({}));
         if (j?.detail?.error === "cryptopanic_api_key_missing") {
@@ -931,14 +1186,18 @@
   }
 
   async function refreshAll() {
+    // loadMarkets() applies the active symbol, which cascades into
+    // loadChart / loadOrderbook / loadCoinglass / loadNews — so we don't call
+    // those here too (avoids a duplicate first-load burst).
     await Promise.all([
       loadHealth(), loadMode(), loadStrategies(), loadSignals(), loadApprovals(),
-      loadChart(), loadCoinglass(), loadOrderbook(), loadNews(),
+      loadTrades(), loadMarkets(),
     ]);
   }
   refreshAll();
   setInterval(loadSignals, 5000);
   setInterval(loadApprovals, 10000);
+  setInterval(loadTrades, 10000);
   setInterval(loadHealth, 10000);
   setInterval(loadChart, 30000);     // refresh chart every 30s
   setInterval(loadCoinglass, 60000); // refresh Coinglass context every 60s
